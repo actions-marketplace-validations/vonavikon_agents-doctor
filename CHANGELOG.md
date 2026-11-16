@@ -4,6 +4,31 @@ All notable changes to workspace-audit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [Unreleased] (v0.7.0 stages 1+3: security hardening)
+
+### Security
+
+- Remote URLs are sanitized at the source (`sanitize_url.py`): userinfo
+  and credential query parameters never reach scan.json, reports,
+  stdout or baseline grouping keys; `credentials_in_remote` is computed
+  on the raw value before it is dropped; a critical finding now
+  recommends rotation. E2E canary: tests/test_remote_leak.py.
+- Single source of secret rules (`secret_rules.py`): the file scanner,
+  the git-grep filter and the history scanner share one rule table;
+  parity corpus (39 lines incl. 14 false positives) pins python and
+  ERE sides together. New classes: access tokens, db URLs with
+  credentials, AWS secret keys, Google/GitHub/Slack tokens, JWTs.
+- Fingerprints switched to HMAC-SHA256 with a per-installation key
+  (`fingerprint.py`): 128 bits, key under the user config dir, no
+  silent fallback to public hashing (corrupt key fails loudly with a
+  remediation hint). Baselines from older versions will show one
+  one-time all-new/all-resolved diff (fingerprint format changed).
+- Git history scanning is bounded and honest (`history_scan.py`):
+  streaming `git log -p`, `--history-depth N` cap, `--history-all-refs`,
+  commits_scanned/commits_total reported per repo; an incomplete or
+  unrequested history scan makes G6 `unknown`, never pass; history
+  secrets now raise critical findings.
+
 ## [0.6.0] - 2026-11-16
 
 The human layer: value-first reporting and safe cleanup.

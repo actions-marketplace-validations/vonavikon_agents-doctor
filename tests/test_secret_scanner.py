@@ -71,9 +71,9 @@ class FingerprintTests(unittest.TestCase):
 
     def test_format(self):
         fp = secret_scanner.fingerprint('some-value')
-        self.assertTrue(fp.startswith('sha256:'))
-        hex_part = fp[len('sha256:'):]
-        self.assertEqual(len(hex_part), 16)
+        self.assertTrue(fp.startswith('hmac256:'))
+        hex_part = fp[len('hmac256:'):]
+        self.assertEqual(len(hex_part), 32)  # 128 bits
         int(hex_part, 16)  # raises unless hex digits only
 
     def test_different_inputs_differ(self):

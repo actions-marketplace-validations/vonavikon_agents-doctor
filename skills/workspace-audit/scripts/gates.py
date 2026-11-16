@@ -689,12 +689,53 @@ def _g6(facts, run):
                 'SEC', 'critical', 'fail',
                 'Credentials in the remote URL of %s' % t.get('name'),
                 'The origin URL embeds a login:password pair; it is in .git/config '
-                'and shows up in every `git remote -v`.',
+                'and shows up in every `git remote -v`. The stored form is '
+                'sanitized; rotate the credential — it has already been in a file.',
                 [{'repo': t.get('name')}], 0.95,
-                'Move auth to a credential helper, then change the password: '
-                'the current one is already in a file.')
+                'Move auth to a credential helper and rotate the credential: '
+                'the current one already sat in plain text.')
+        for hs in ex.get('history_secrets') or []:
+            git_hits += 1
+            run.finding(
+                'SEC', 'critical', 'fail',
+                'Secret in git history of %s: %s:%s'
+                % (t.get('name'), hs.get('file'), hs.get('line')),
+                'A %s lives in a historical commit; cloning or pushing '
+                're-ships it every time.' % hs.get('kind', 'secret'),
+                [{'repo': t.get('name'), 'file': hs.get('file'),
+                  'line': hs.get('line'), 'commit': hs.get('commit'),
+                  'kind': hs.get('kind'), 'fingerprint': hs.get('fingerprint')}],
+                hs.get('confidence', 0.9),
+                'Rotate the secret, then purge it from history '
+                '(git filter-repo or BFG).')
     run.rule('tracked-secrets', 'fail' if git_hits else 'pass',
-             ['secret hits in git (index, remote URLs): %d' % git_hits])
+             ['secret hits in git (index, remote URLs, history): %d' % git_hits])
+
+    # deep-scan coverage: an incomplete history scan must never read as pass
+    coverages = [(t.get('name'), (t.get('extra') or {}).get('history_coverage'))
+                 for t in top]
+    coverages = [(name, c) for name, c in coverages if c]
+    if coverages:
+        incomplete = [(n, c) for n, c in coverages if not c.get('complete')]
+        for name, c in incomplete:
+            run.finding(
+                'SEC', 'medium', 'unknown',
+                'Git history scan incomplete for %s' % name,
+                'Scanned %s of %s commits%s: findings below the cap are not '
+                'excluded, but the rest of the history is unverified.'
+                % (c.get('commits_scanned'), c.get('commits_total'),
+                   ' (all refs)' if c.get('all_refs') else ''),
+                [{'repo': name, 'scanned': c.get('commits_scanned'),
+                  'total': c.get('commits_total'),
+                  'all_refs': c.get('all_refs')}], 0.9,
+                'Re-run with a higher --history-depth or without a cap to '
+                'verify the full history.')
+        run.rule('history-coverage', 'unknown' if incomplete else 'pass',
+                 ['repos with history scanned: %d, incomplete: %d'
+                  % (len(coverages), len(incomplete))])
+    else:
+        run.rule('history-coverage', 'unknown',
+                 ['deep scan not requested: history unchecked (not a pass)'])
 
     hints = GATE_POLICY['SECRET_PREVENTION_HINTS']
     repos_scanned = sum(1 for t in top if t.get('kind') == 'repo')

@@ -294,6 +294,15 @@ class SecretTests(unittest.TestCase):
         facts['top_level'][0]['extra']['hooks'] = [
             {'name': 'pre-commit',
              'flags': {'add_all': False, 'push': False, 'secret_scan': True}}]
+        # without deep history data G6 stays unknown: an unchecked history
+        # must never read as pass (v0.7.0 contract)
+        gate_list, _ = gates.evaluate(facts)
+        self.assertEqual(statuses_by_gid(gate_list)['G6'], 'unknown')
+
+        # with a complete deep scan on record the gate reaches pass
+        facts['top_level'][0]['extra']['history_coverage'] = {
+            'commits_scanned': 12, 'commits_total': 12, 'complete': True,
+            'all_refs': False}
         gate_list, _ = gates.evaluate(facts)
         self.assertEqual(statuses_by_gid(gate_list)['G6'], 'pass')
 

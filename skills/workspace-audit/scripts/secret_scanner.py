@@ -1,35 +1,31 @@
 """secret_scanner: secret detection and redaction for workspace-audit.
 
 Contract: raw secret values never leave this module. Every finding carries
-only the file, line, kind, rule id, confidence, a rule-derived mask and a
-salted one-way fingerprint.
+only the file, line, kind, rule id, confidence, a rule-derived mask and an
+HMAC-SHA256 fingerprint keyed by a per-installation secret (fingerprint.py).
+Rules live in secret_rules.py — the single source shared by the file
+scanner, the git-grep filter and the history scanner.
 """
-import hashlib, re
+import re
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import secret_rules  # noqa: E402  (single source of detection rules)
+import fingerprint as fp_key  # noqa: E402  (per-installation HMAC key)
+
+# Single source of truth: secret_rules.RULES. Each rule there carries
+# 'py' (python regex) and 'ere' (POSIX ERE); 'regex' is kept as an alias
+# for backward compatibility with older callers/tests.
+RULES = secret_rules.RULES
+for _r in RULES:
+    _r.setdefault('regex', _r['py'])
+
+# POSIX ERE for `git grep -i -E` — generated from the same rule table.
+GIT_GREP_RE = secret_rules.GIT_GREP_RE_COMBINED
+
+# Kept for import compatibility; no longer used (HMAC replaced salted sha256).
 SALT = 'workspace-audit-v1'
-
-RULES = [
-    {'id': 'SEC-001', 'kind': 'api-key', 'mask': 'sk-***',
-     'regex': re.compile(r'sk-[A-Za-z0-9_-]{16,}'), 'confidence': 0.95},
-    {'id': 'SEC-002', 'kind': 'bearer-token', 'mask': 'Bearer ***',
-     'regex': re.compile(r'Bearer\s+[A-Za-z0-9._-]{20,}'), 'confidence': 0.90},
-    {'id': 'SEC-003', 'kind': 'aws-access-key', 'mask': 'AKIA***',
-     'regex': re.compile(r'\bAKIA[0-9A-Z]{16}\b'), 'confidence': 0.95},
-    {'id': 'SEC-004', 'kind': 'private-key', 'mask': 'PRIVATE KEY***',
-     'regex': re.compile(r'-----BEGIN [A-Z ]*PRIVATE KEY-----'), 'confidence': 0.99},
-    {'id': 'SEC-005', 'kind': 'secret literal', 'mask': '***',
-     'regex': re.compile(r'(?i)(?<![a-z0-9])(api[_-]?key|apikey|password|secret|token|authorization)["\']?\s*[:=]\s*["\'][^"\']{8,}'),
-     'confidence': 0.70},
-]
-
-# POSIX ERE string for `git grep -i -E`: every rule detectable without
-# lookbehind/case flags. Used by audit_scan.py.
-GIT_GREP_RE = ("sk-[A-Za-z0-9_-]{16,}|Bearer[[:space:]]+[A-Za-z0-9._-]{20,}"
-               "|AKIA[0-9A-Z]{16}"
-               "|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-               "|api[_-]?key[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"
-               "|password[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"
-               "|token[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}")
 
 REDACTED = '[REDACTED]'
 
@@ -43,16 +39,16 @@ _HUNK_RE = re.compile(r'^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@')
 
 
 def fingerprint(value: str) -> str:
-    """Salted SHA-256, 16 hex chars, 'sha256:' prefix. One-way, rainbow-resistant."""
-    return 'sha256:' + hashlib.sha256((SALT + value).encode('utf-8')).hexdigest()[:16]
+    """HMAC-SHA256 with the per-installation key: 'hmac256:' + 32 hex (128 bits).
+
+    Raises FingerprintKeyError when the local key is unavailable or corrupt —
+    never silently falls back to public hashing (see fingerprint.py)."""
+    return fp_key.fingerprint(value)
 
 
 def find_in_line(line: str):
-    """Return the first matching rule dict or None."""
-    for rule in RULES:
-        if rule['regex'].search(line):
-            return rule
-    return None
+    """Return the first matching rule dict or None (single source: secret_rules)."""
+    return secret_rules.find_rule(line)
 
 
 def scan_text(rel_path: str, text: str) -> list:

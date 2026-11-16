@@ -28,6 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import secret_scanner as secscan  # noqa: E402
 import enrich  # noqa: E402
 import gates as gates_engine  # noqa: E402
+import sanitize_url  # noqa: E402
+import history_scan  # noqa: E402
+from fingerprint import FingerprintKeyError  # noqa: E402
 
 def _exists(p):
     """exists() that treats permission errors as absent (pathlib raises)."""
@@ -42,7 +45,7 @@ MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
 MEMORY_LINE_LIMIT = 200          # memory loads up to 200 lines or 25 KB, whichever comes first
 CHAIN_BUDGET = 32768             # Codex budget for the root + nested AGENTS.md chain
 SKILL_DESC_LIMIT = 1024          # Z Code skill description limit
-RULES_VERSION = '0.4.0'          # rule set version, goes into the report
+RULES_VERSION = '0.7.0'          # rule set version, goes into the report
 HARNESS_STALE_DAYS = 90          # older: harness counts as abandoned
 HARNESS_FRESH_DAYS = 30          # newer: active
 
@@ -156,10 +159,15 @@ def classify_remote(url):
 def git_info(p):
     if not _exists(p / '.git'):
         return None
-    info = {'remote': None, 'last_commit': None, 'dirty': [], 'untracked': []}
+    info = {'remote': None, 'last_commit': None, 'dirty': [], 'untracked': [],
+            'credentials_in_remote': False}
     rc, out = run_git(p, 'remote', 'get-url', 'origin')
     if rc == 0 and out.strip():
-        info['remote'] = out.strip()
+        raw = out.strip()
+        # only the sanitized URL may leave this function; credential
+        # detection runs on the raw value before it is dropped
+        info['remote'] = sanitize_url.sanitize_remote_url(raw)
+        info['credentials_in_remote'] = sanitize_url.has_credentials(raw)
     rc, out = run_git(p, 'log', '-1', '--format=%cI')
     if rc == 0 and out.strip():
         info['last_commit'] = out.strip()
@@ -186,7 +194,7 @@ def nested_repos(p):
 
 # --- blocks E and F: sync and secrets in git ------------------------------------
 
-def repo_extra(p, gi, deep=False):
+def repo_extra(p, gi, deep=False, history_depth=None, history_all_refs=False):
     ex = {'branch': None, 'ahead_behind': None, 'remote_class': None,
           'credentials_in_remote': False, 'gitignore': _exists(p / '.gitignore'),
           'hooks': [], 'sync_commits_last30': 0, 'tracked_secrets': [],
@@ -201,7 +209,8 @@ def repo_extra(p, gi, deep=False):
     url = gi.get('remote')
     if url:
         ex['remote_class'] = classify_remote(url)
-        ex['credentials_in_remote'] = bool(re.search(r'://[^/@\s]+@', url))
+    # computed on the raw URL inside git_info, before sanitization
+    ex['credentials_in_remote'] = bool(gi.get('credentials_in_remote'))
 
     hooks_dir = p / '.git' / 'hooks'
     if _exists(hooks_dir):
@@ -227,8 +236,11 @@ def repo_extra(p, gi, deep=False):
         ex['tracked_secrets'] = secscan.scan_git_grep_output(out)[:10]
 
     if deep:
-        rc, out = run_git(p, 'log', '-p', '--max-count=300')
-        ex['history_secrets'] = secscan.scan_diff_output(out)
+        hist = history_scan.scan_history(
+            p, max_commits=history_depth, all_refs=history_all_refs,
+            match_line=secscan.find_in_line)
+        ex['history_secrets'] = hist.pop('findings')
+        ex['history_coverage'] = hist
     return ex
 
 
@@ -505,7 +517,7 @@ def chain_budget(root):
     return out
 
 
-def scan(root, home, deep=False):
+def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
     t0 = time.monotonic()
     rep = {'schema_version': '1.0', 'root': str(root), 'home': str(home),
            'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
@@ -606,9 +618,13 @@ def scan(root, home, deep=False):
                     'git': gi,
                     'size_bytes': per_top.get(entry.name, 0)}
             if gi:
-                item['extra'] = repo_extra(entry, gi, deep)
+                item['extra'] = repo_extra(entry, gi, deep,
+                                           history_depth, history_all_refs)
                 if gi.get('remote'):
-                    key = re.sub(r'^[^@]*@', '', gi['remote'])
+                    # checkout identity: scheme://host/path only — userinfo is
+                    # already sanitized away; query/fragment do not change
+                    # which repository a checkout points at
+                    key = re.split(r'[?#]', gi['remote'])[0]
                     remotes.setdefault(key, []).append(entry.name)
             rep['top_level'].append(item)
         else:
@@ -698,6 +714,12 @@ def main():
     ap.add_argument('path', help='workspace root')
     ap.add_argument('--home', default=str(Path.home()), help='home directory (harnesses, memory, skills)')
     ap.add_argument('--deep', action='store_true', help='scan git history for secrets (slower)')
+    ap.add_argument('--history-depth', type=int, default=None, metavar='N',
+                    help='cap the deep history scan at N commits per repo; '
+                         'coverage of the cap is reported and incomplete scans '
+                         'never read as a pass')
+    ap.add_argument('--history-all-refs', action='store_true',
+                    help='deep-scan history across all refs, not only HEAD')
     ap.add_argument('--baseline', default=None, help='previous scan.json: adds a diff section (new findings only)')
     ap.add_argument('--out', default='scan.json', help='where to write the JSON report')
     a = ap.parse_args()
@@ -705,7 +727,12 @@ def main():
     home = Path(a.home).resolve()
     if not root.is_dir():
         sys.exit('not a directory: ' + str(root))
-    rep = scan(root, home, a.deep)
+    try:
+        rep = scan(root, home, a.deep, a.history_depth, a.history_all_refs)
+    except FingerprintKeyError as e:
+        sys.exit('fingerprint key unavailable: %s\n'
+                 'fix with: python skills/workspace-audit/scripts/fingerprint.py --check'
+                 % str(e))
     if a.baseline and _exists(Path(a.baseline)):
         try:
             old = json.loads(Path(a.baseline).read_text(encoding='utf-8'))
