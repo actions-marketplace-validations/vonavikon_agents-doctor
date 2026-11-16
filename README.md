@@ -94,6 +94,24 @@ python skills/workspace-audit/scripts/audit_scan.py demo/employee-workspace --ho
 
 All tokens and hosts in the fixtures are synthetic.
 
+## Report and exports
+
+The skill writes `AUDIT-<date>.md`: executive summary, overall status (`FAIL` / `NEEDS ATTENTION` / `PASS`), gate results, findings by severity and recommended actions. A sample for a messy workspace: [docs/sample-report.md](docs/sample-report.md). The generators are deterministic and need no model:
+
+```
+python skills/workspace-audit/scripts/report_generator.py <scan.json> --out AUDIT.md
+python skills/workspace-audit/scripts/sarif.py <scan.json> --out report.sarif
+python skills/workspace-audit/scripts/workspace_audit.py --help
+```
+
+`sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `workspace_audit.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, and `fix <fid>` — plan-only by default.
+
+Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix, requires an explicit `yes` before `--apply` touches anything, and re-audits afterwards. V1 supports three fix types: removing empty directories, creating a `.gitignore` from the template, and moving confirmed junk into `.workspace-audit-trash/`.
+
+## Documentation
+
+[Quick start](docs/quickstart.md) · [Architecture](docs/architecture.md) · [Gates methodology](docs/gates.md) · [Configuration and exclusions](docs/configuration.md) · [CLI reference](docs/cli.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](docs/contributing.md) · [Changelog](CHANGELOG.md) · [Release process](RELEASE.md) · [Report JSON schema](docs/schema/report-schema.json)
+
 ## QA
 
 ```
@@ -122,6 +140,7 @@ The split is deterministic scan first, LLM interpretation second: the scanner pr
 - Skill versions in the CLI plugin cache are not treated as drift: the cache is managed by the CLI.
 - Junk heuristics are name-based and bilingual (en/ru); tune expectations accordingly.
 - The symlink boundary regression test skips on systems that forbid creating symlinks (Windows without Developer Mode); the boundary guard itself is always active.
+- Remediation supports three fix types in v1 (empty dirs, .gitignore template, confirmed junk to trash); everything else reports `unsupported` instead of improvising.
 
 ## License
 
