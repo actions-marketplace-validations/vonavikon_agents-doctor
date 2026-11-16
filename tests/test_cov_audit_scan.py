@@ -313,18 +313,25 @@ class RichWorkspaceScan(AuditScanCase):
         self.assertEqual(locs, {'user-zcode', 'user-claude', 'project-agents',
                                 'project-claude', 'plugins-cache'})
         self.assertTrue(self.rep['skills']['locations_checked'])
-        self.assertEqual(self.rep['skills']['duplicates'],
-                         [{'name': 'alpha', 'copies': 2, 'sync': 'DIVERGED',
-                           'paths': [str(self.home / '.zcode' / 'skills' / 'alpha' / 'SKILL.md'),
-                                     str(self.home / '.claude' / 'skills' / 'alpha' / 'SKILL.md')]}])
+        dups = self.rep['skills']['duplicates']
+        self.assertEqual(len(dups), 1)
+        self.assertEqual((dups[0]['name'], dups[0]['copies'],
+                          dups[0]['sync']), ('alpha', 2, 'DIVERGED'))
+        self.assertEqual(
+            {str(Path(p).resolve()) for p in dups[0]['paths']},
+            {str(Path(self.home / '.zcode' / 'skills' / 'alpha'
+                                / 'SKILL.md').resolve()),
+             str(Path(self.home / '.claude' / 'skills' / 'alpha'
+                                / 'SKILL.md').resolve())})
         self.assertTrue(any(f['section'] == 'skills'
                             for f in self.rep['findings']))
 
     def test_memory_index_over_line_limit(self):
         mem = str(self.home / '.zcode' / 'cli' / 'memories' / 'MEMORY.md')
         tax = self.rep['context_tax']
-        self.assertIn(mem, [f['path'] for f in tax['session_files']
-                            if f['role'] == 'memory-index'])
+        self.assertIn(str(Path(mem).resolve()),
+                     [f['path'] for f in tax['session_files']
+                      if f['role'] == 'memory-index'])
         self.assertEqual(tax['memory_over_lines'], [mem])
         self.assertEqual(tax['memory_over_limit'], [])  # 250 short lines
 
@@ -387,7 +394,8 @@ class FsErrorGuards(AuditScanCase):
         fakes[2].is_dir.side_effect = OSError('entry vanished')
 
         real_scandir = os.scandir
-        denied = {ws / 'denied_dir', home / '.zcode'}
+        # scan() resolves root/home on entry: intercept the resolved forms
+        denied = {(ws / 'denied_dir').resolve(), (home / '.zcode').resolve()}
 
         def scandir_wrap(path=None):
             p = Path(path)
