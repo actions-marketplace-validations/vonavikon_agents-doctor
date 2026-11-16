@@ -137,7 +137,8 @@ jobs:
                    'README.md', 'CHANGELOG.md']
           for pattern in ('commands/*', 'skills/**/*', 'docs/*.md',
                           'docs/schema/*.json'):
-              allow.extend(p.as_posix() for p in root.glob(pattern) if p.is_file())
+              allow.extend(p.as_posix() for p in root.glob(pattern)
+                           if p.is_file() and '__pycache__' not in p.parts)
           existing = [a for a in allow if (root / a).is_file()]
           missing = [a for a in allow if not (root / a).is_file()
                      and a not in ('CHANGELOG.md',)]
@@ -149,10 +150,12 @@ jobs:
           with zipfile.ZipFile(out) as z:
               names = set(z.namelist())
           assert names == set(existing), 'zip contents diverge from allowlist'
-          forbidden = ('tests/', 'bench/', '.github/', 'llm-eval/', 'qa/',
-                       'tools/', '.coveragerc', '.gitignore')
-          assert not any(n.startswith(forbidden) for n in names for forbidden in forbidden), \
+          banned = ('tests/', 'bench/', '.github/', 'llm-eval/', 'qa/',
+                    'tools/', '.coveragerc', '.gitignore')
+          assert not any(n.startswith(b) for n in names for b in banned), \
               'forbidden paths in the package'
+          assert not any('__pycache__' in n or n.endswith('.pyc')
+                         for n in names), 'bytecode in the package'
           print('packaged', out, len(names), 'files, allowlist verified')
           EOF
       - name: create release
