@@ -160,6 +160,7 @@ def _never_reason(root, rel, size=None, max_bytes=None, tracked=None):
     anywhere in the path, the trash folder itself, secret-looking
     names, git-tracked, over the per-item cap.
     """
+    root = Path(root).resolve()   # short/long form must not fake an escape
     p = os.path.normpath(str(rel))
     if os.path.isabs(p) or p == '..' or p.startswith('..' + os.sep):
         return 'escape'

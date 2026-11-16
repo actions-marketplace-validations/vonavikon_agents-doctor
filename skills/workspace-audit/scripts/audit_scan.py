@@ -533,6 +533,7 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
     per_top, total_files = {}, 0
     seen_secret_lines = set()
     skipped_links = 0
+    link_skips = []
     # deferred, read-once work: sizes come from DirEntry stats (cached on
     # Windows), file CONTENT is read at most once per file, and only for
     # the few files that need it (duplicate-size groups, secret candidates)
@@ -556,17 +557,17 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
         has_children = False
         for ent in entries:
             try:
-                if ent.is_symlink():
-                    if ent.is_dir():
-                        skipped_links += 1
-                        continue
-                    try:
-                        if not inside_root(Path(ent.path).resolve()):
-                            skipped_links += 1
-                            continue
-                    except OSError:
-                        skipped_links += 1
-                        continue
+                # boundary by realpath, not by is_symlink(): junctions and
+                # any other reparse points must not silently pass either
+                try:
+                    real = Path(os.path.realpath(ent.path))
+                except OSError:
+                    real = None
+                if real is not None and str(real) != os.path.normpath(ent.path)                         and not inside_root(real):
+                    skipped_links += 1
+                    if len(link_skips) < 8:
+                        link_skips.append(ent.name)
+                    continue
                 if ent.is_dir(follow_symlinks=False):
                     has_children = True
                     dn = ent.name
@@ -814,6 +815,7 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
                     'total_files': total_files,
                     'total_size_bytes': sum(per_top.values()),
                     'skipped_symlinks_outside': skipped_links,
+                    'skipped_symlink_names': link_skips,
                     'duration_sec': round(time.monotonic() - t0, 2)}
     return rep
 
@@ -861,6 +863,10 @@ def main():
     if a.profile:
         for k, v in sorted(rep['stats']['profile'].items()):
             print('profile %-8s %8.2f s' % (k, v), file=sys.stderr)
+        if rep['stats'].get('skipped_symlink_names'):
+            print('profile symlink/outside skips: %d %r'
+                  % (rep['stats']['skipped_symlinks_outside'],
+                     rep['stats']['skipped_symlink_names']), file=sys.stderr)
     j = rep['junk']
     st = lambda s: sum(1 for g in rep['gates'] if g['status'] == s)
     print(f"scan: {rep['stats']['total_files']} files, "

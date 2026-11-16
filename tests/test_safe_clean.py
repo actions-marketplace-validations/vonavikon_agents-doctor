@@ -403,8 +403,9 @@ def crafted_plan(ws, *items, max_bytes=None):
     return {'root': str(ws),
             'max_bytes': (max_bytes if max_bytes is not None
                           else safe_clean.DEFAULT_MAX_BYTES),
-            'items': [{'path': p, 'size': (ws / p).stat().st_size
-                       if (ws / p).is_file() else 0,
+            'items': [{'path': p,
+                       'size': (ws / p).stat().st_size
+                       if os.path.isfile(ws / p) else 0,
                        'action': a, 'category': safe_clean.CAT_CONFIRMED,
                        'reason': 'crafted', 'cautious': False}
                       for p, a in items],
@@ -526,7 +527,10 @@ class DestinationCollision(SafeCleanCase):
             summary = safe_clean.execute(plan, self.ws,
                                          confirm=lambda p: 'YES')
 
-        self.assertEqual(summary['trash_dir'], str(run_dir))
+        # compare resolved forms: CI runners hand tempfile short (8.3)
+        # paths while execute() resolves to the long form
+        self.assertEqual(str(Path(summary['trash_dir']).resolve()),
+                         str(run_dir.resolve()))
         moved = summary['moved'][0]
         self.assertTrue(moved['moved_to'].endswith('screenshot_1.png.__1__'))
         self.assertEqual(squatter.read_bytes(), b'older run occupant')

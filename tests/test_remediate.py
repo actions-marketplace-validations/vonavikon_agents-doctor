@@ -582,7 +582,12 @@ class Cli(RemediateCase):
         rc, out, err = self.run_main(self.scan_path, fid,
                                      '--root', other)
         self.assertEqual(rc, 0, err)
-        self.assertIn(str(other / 'temp-cli.txt'), out)
+        # CI hands tempfile short (8.3) paths while the tool prints
+        # the resolved long form: accept either spelling
+        short = str(other / 'temp-cli.txt')
+        long = str((other / 'temp-cli.txt').resolve())
+        self.assertTrue(short in out or long in out,
+                        'neither %r nor %r in output' % (short, long))
 
     def test_reaudit_after_apply(self):
         self.scan()
