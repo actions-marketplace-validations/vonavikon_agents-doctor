@@ -253,7 +253,7 @@ class SecurityRegressionTest(unittest.TestCase):
         gate6 = next((g for g in report.get('gates', []) if g.get('n') == 6),
                      None)
         self.assertIsNotNone(gate6, 'gate 6 missing from the report')
-        self.assertEqual(gate6.get('status'), 'FAIL',
+        self.assertEqual(gate6.get('status'), 'fail',
                          'gate 6 must FAIL while planted secrets exist')
 
         worktree, tracked, history = self._collect_secret_entries(report)

@@ -1,11 +1,13 @@
 {
-  "gates": {"1": "FAIL", "2": "WARN", "3": "FAIL", "4": "FAIL", "5": "WARN", "6": "FAIL", "7": "FAIL", "8": "FAIL", "9": "MANUAL"},
+  "gates": {"1": "fail", "2": "pass", "3": "fail", "4": "fail", "5": "fail", "6": "fail", "7": "warn", "8": "fail", "9": "warn"},
   "counts": {"secrets": 1, "junk_files": 4, "junk_dirs": 1, "empty_dirs": 1, "duplicates": 1, "large_files": 1, "context_drift": 1, "dup_checkouts": 1},
   "tracked_secrets_min": 1,
   "memory_over_limit": true,
   "memory_over_lines": true,
   "chain_budget_over": true,
   "diff_new_on_rerun": 0,
+  "critical_findings_min": 2,
+  "findings_schema": true,
   "nested_repos": ["vendor/engine"],
   "skills_desync": ["x-helper"],
   "notes_contain": ["tools/CLAUDE.md"]

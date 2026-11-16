@@ -26,6 +26,8 @@ if hasattr(sys.stdout, 'reconfigure'):
 # secret detection and redaction live in one module: raw values never leave it
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import secret_scanner as secscan  # noqa: E402
+import enrich  # noqa: E402
+import gates as gates_engine  # noqa: E402
 
 # --- thresholds and heuristics from the audit protocol ------------------------
 PROJECT_BENCH = 16 * 1024        # project instruction file: up to ~16 KB is achievable
@@ -33,7 +35,7 @@ MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
 MEMORY_LINE_LIMIT = 200          # memory loads up to 200 lines or 25 KB, whichever comes first
 CHAIN_BUDGET = 32768             # Codex budget for the root + nested AGENTS.md chain
 SKILL_DESC_LIMIT = 1024          # Z Code skill description limit
-RULES_VERSION = '0.3.0'          # rule set version, goes into the report
+RULES_VERSION = '0.4.0'          # rule set version, goes into the report
 HARNESS_STALE_DAYS = 90          # older: harness counts as abandoned
 HARNESS_FRESH_DAYS = 30          # newer: active
 
@@ -406,81 +408,30 @@ def skills_report(home, root):
 
 
 # --- summary gates ---------------------------------------------------------------
+# Gate evaluation moved to gates.py (stage 2): declarative definitions,
+# severity/status split, UNKNOWN on missing data. The old inline builder
+# was removed; audit_scan collects facts, gates.evaluate judges them.
 
-def build_gates(rep):
-    gates = []
-    drift = rep.get('context_drift', [])
-    gates.append({'n': 1, 'gate': 'One instruction file per level; duplicates are identical or a pointer',
-                  'status': 'FAIL' if drift else 'PASS',
-                  'evidence': [f"{d['path']}: similarity {d['jaccard']}" for d in drift]})
-    generic = [(e['path'], e['generic_markers']) for e in rep['context_files']
-               if e['generic_markers']]
-    gates.append({'n': 2, 'gate': 'Auto-loaded context has no generic or overview blocks',
-                  'status': 'WARN' if generic else 'PASS',
-                  'evidence': [f"{p}: {', '.join(m)}" for p, m in generic]})
-    dead = [(e['path'], e['dead_links'] + e['dead_paths'] + e['dead_commands'])
-            for e in rep['context_files']
-            if e['dead_links'] or e['dead_paths'] or e['dead_commands']]
-    gates.append({'n': 3, 'gate': 'All cross-references in instruction files resolve',
-                  'status': 'FAIL' if dead else 'PASS',
-                  'evidence': [f"{p}: {len(d)} dead" for p, d in dead]})
-    nongit = [t for t in rep['top_level'] if t['kind'] == 'dir']
-    heavy = [t for t in nongit if t['size_bytes'] > 1024 * 1024]
-    gates.append({'n': 4, 'gate': 'Every folder has a decided fate; valuable data is under version control',
-                  'status': 'FAIL' if heavy else ('WARN' if nongit else 'PASS'),
-                  'evidence': [f"{t['name']}: {t['size_bytes'] // 1024} KB outside git"
-                               for t in nongit]})
-    push_ev, sweep_fail = [], False
-    for t in rep['top_level']:
-        ex = t.get('extra')
-        if not ex:
-            continue
-        for h in ex['hooks']:
-            if h['flags']['push']:
-                # a push hook on its own is fine (post-commit sync); the risk
-                # is add -A sweeping unreviewed files into the commit
-                push_ev.append(f"{t['name']}: hook {h['name']} pushes, remote {ex['remote_class'] or 'not set'}")
-            if h['flags']['add_all'] and t['git']['untracked']:
-                push_ev.append(f"{t['name']}: hook {h['name']} runs git add -A with "
-                               f"{len(t['git']['untracked'])} untracked files, junk will land in the commit")
-                sweep_fail = True
-    gates.append({'n': 5, 'gate': 'Auto-push only for personal storage; publishing requires confirmation',
-                  'status': 'FAIL' if sweep_fail else ('WARN' if push_ev else 'PASS'),
-                  'evidence': push_ev})
-    sec_ev = [f"{s['path']}:{s['line']} {s['kind']}" for s in rep['secrets']]
-    for t in rep['top_level']:
-        ex = t.get('extra')
-        if not ex:
-            continue
-        if ex['credentials_in_remote']:
-            sec_ev.append(f"{t['name']}: credentials in remote URL")
-        sec_ev += [f"{t['name']} (staged): {e['file']}:{e['line']} {e['kind']}"
-                   for e in ex['tracked_secrets']]
-    gates.append({'n': 6, 'gate': 'No keys in tracked files or URLs; secret scan in the commit chain',
-                  'status': 'FAIL' if sec_ev else 'PASS', 'evidence': sec_ev})
-    skill_ev = []
-    for d in rep['skills']['duplicates']:
-        if d['sync'] != 'identical':
-            skill_ev.append(f"{d['name']}: {d['copies']} copies, {d['sync']}")
-    for e in rep['skills']['entries']:
-        if e['desc_len'] is not None and e['desc_len'] > SKILL_DESC_LIMIT:
-            skill_ev.append(f"{e['name']}: description {e['desc_len']} chars, limit 1024")
-        elif not e['has_triggers']:
-            skill_ev.append(f"{e['name']}: no triggers in description")
-    hard = [e for e in skill_ev if 'DIVERGED' in e or 'limit 1024' in e]
-    gates.append({'n': 7, 'gate': 'Skills: descriptions with triggers under 1024 chars, no drifted copies',
-                  'status': 'FAIL' if hard else ('WARN' if skill_ev else 'PASS'),
-                  'evidence': skill_ev})
-    owner_ev = list(rep['harness'].get('notes', [])) + \
-        [f"copy drift: {d['path']}" for d in drift]
-    gates.append({'n': 8, 'gate': 'Every rule has one owner file; copy drift excluded by design',
-                  'status': 'FAIL' if owner_ev else 'PASS',
-                  'evidence': owner_ev or ['ok']})
-    gates.append({'n': 9, 'gate': 'Instruction changes are verified by a run, not a feeling',
-                  'status': 'MANUAL',
-                  'evidence': ['scanner cannot check this: the skill offers to measure auto-load weight '
-                               'before/after and run a typical task']})
-    return gates
+
+def _reference_texts(root, proj_dirs, skills_paths):
+    """Texts a junk candidate may be referenced from: instruction files,
+    package.json and SKILL.md bodies. Capped per file."""
+    out = []
+    bases = [root] + list(proj_dirs)
+    for base in bases:
+        for name in ('AGENTS.md', 'CLAUDE.md', 'package.json'):
+            p = base / name
+            if p.is_file():
+                try:
+                    out.append(p.read_text(encoding='utf-8', errors='replace')[:100000])
+                except OSError:
+                    pass
+    for p in skills_paths:
+        try:
+            out.append(Path(p).read_text(encoding='utf-8', errors='replace')[:100000])
+        except OSError:
+            pass
+    return out
 
 
 # --- findings with fingerprint (for baseline/diff) ------------------------------
@@ -668,6 +619,15 @@ def scan(root, home, deep=False):
                 rep['context_drift'].append(drift)
 
     rep['harness'] = harness_report(home, root)
+    # recursive, honest harness activity (stage 2): overrides the shallow
+    # top-level mtime heuristic; missing data reads as unknown, not abandoned
+    try:
+        hs = enrich.harness_states(home)
+        for tool in rep['harness']['tools']:
+            if tool.get('tool') in hs:
+                tool.update(hs[tool['tool']])
+    except OSError:
+        pass
     claude = next((t for t in rep['harness']['tools'] if t['tool'] == 'claude'), None)
     if claude and claude.get('state') == 'abandoned':
         for e in rep['context_files']:
@@ -681,8 +641,36 @@ def scan(root, home, deep=False):
     rep['skills'] = skills_report(home, root)
     rep['context_budget'] = chain_budget(root)
     rep['chain_budget_over'] = any(c['over'] for c in rep['context_budget'])
+
+    # --- stage-2 enrichment facts ------------------------------------------------
+    repo_dirs = [t['name'] for t in rep['top_level'] if t.get('kind') == 'repo']
+    try:
+        rep['config_integrity'] = enrich.config_integrity(root, repo_dirs)
+    except OSError:
+        rep['config_integrity'] = []
+    try:
+        rep['heavy_outside_git'] = enrich.heavy_outside_git(root)
+    except OSError:
+        rep['heavy_outside_git'] = []
+    skills_paths = [e['path'] for e in rep['skills']['entries']]
+    ref_texts = _reference_texts(root, proj_ctx_dirs, skills_paths)
+    junk_candidates = rep['junk']['files'] + rep['junk']['dirs']
+    try:
+        rep['junk_classified'] = enrich.classify_junk(root, junk_candidates, ref_texts)
+    except OSError:
+        rep['junk_classified'] = []
+    # normalize the enrich shape to the gates contract (cls + signals dict)
+    for j in rep['junk_classified']:
+        j.setdefault('cls', j.pop('classification', 'unknown'))
+        if 'signals' not in j:
+            j['signals'] = {k: j.get(k) for k in ('tracked', 'age_days', 'referenced')}
+    try:
+        rep['skills_extra'] = enrich.skills_frontmatter(rep['skills']['entries'])
+    except OSError:
+        rep['skills_extra'] = {}
+
     rep['findings'] = collect_findings(rep)
-    rep['gates'] = build_gates(rep)
+    rep['gates'], rep['findings_detailed'] = gates_engine.evaluate(rep)
     rep['stats'] = {'total_files': total_files,
                     'total_size_bytes': sum(per_top.values()),
                     'skipped_symlinks_outside': skipped_links,
@@ -719,7 +707,10 @@ def main():
     st = lambda s: sum(1 for g in rep['gates'] if g['status'] == s)
     print(f"scan: {rep['stats']['total_files']} files, "
           f"{rep['stats']['total_size_bytes'] // 1024} KB, {rep['stats']['duration_sec']} s")
-    print(f"gates: FAIL {st('FAIL')}, WARN {st('WARN')}, PASS {st('PASS')}, MANUAL {st('MANUAL')}")
+    print(f"gates: fail {st('fail')}, warn {st('warn')}, pass {st('pass')}, "
+          f"unknown {st('unknown')}, n/a {st('not_applicable')}")
+    print(f"typed findings: {len(rep['findings_detailed'])} "
+          f"(critical {sum(1 for f in rep['findings_detailed'] if f['severity'] == 'critical')})")
     print(f"findings: secrets {len(rep['secrets'])}, drift pairs {len(rep['context_drift'])}, "
           f"duplicate checkouts {len(rep['dup_checkouts'])}, "
           f"junk files {len(j['files'])}, junk dirs {len(j['dirs'])}, "

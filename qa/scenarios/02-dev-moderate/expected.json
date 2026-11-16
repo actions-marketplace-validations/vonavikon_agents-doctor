@@ -1,10 +1,12 @@
 {
-  "gates": {"1": "PASS", "2": "PASS", "3": "FAIL", "4": "WARN", "5": "PASS", "6": "FAIL", "7": "PASS", "8": "PASS", "9": "MANUAL"},
+  "gates": {"1": "pass", "2": "warn", "3": "fail", "4": "warn", "5": "pass", "6": "fail", "7": "warn", "8": "pass", "9": "warn"},
   "counts": {"secrets": 1, "junk_files": 1, "junk_dirs": 1, "empty_dirs": 0, "duplicates": 0, "large_files": 0, "context_drift": 0, "dup_checkouts": 0},
   "tracked_secrets_min": 0,
   "memory_over_limit": false,
   "memory_over_lines": false,
   "chain_budget_over": false,
   "diff_new_on_rerun": 0,
+  "critical_findings_min": 1,
+  "findings_schema": true,
   "skills_desync": []
 }

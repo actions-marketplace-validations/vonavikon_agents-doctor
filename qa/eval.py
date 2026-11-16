@@ -91,6 +91,32 @@ def eval_scenario(sc_dir):
         ok(f"tracked secrets >= {exp['tracked_secrets_min']}",
            tracked >= exp['tracked_secrets_min'], f'actual {tracked}')
 
+    if 'critical_findings_min' in exp:
+        crit = sum(1 for f in rep.get('findings_detailed', [])
+                   if f.get('severity') == 'critical')
+        ok(f"critical findings >= {exp['critical_findings_min']}",
+           crit >= exp['critical_findings_min'], f'actual {crit}')
+
+    if exp.get('findings_schema'):
+        fnd = rep.get('findings_detailed', [])
+        sev = {'critical', 'high', 'medium', 'low', 'info'}
+        sts = {'pass', 'fail', 'warn', 'unknown', 'not_applicable'}
+        problems = []
+        fids = [f.get('fid') for f in fnd]
+        if len(set(fids)) != len(fids):
+            problems.append('duplicate fids')
+        for f in fnd:
+            if f.get('severity') not in sev:
+                problems.append('bad severity: %s' % f.get('severity'))
+            if f.get('status') not in sts:
+                problems.append('bad status: %s' % f.get('status'))
+            if f.get('status') in ('fail', 'warn') and not f.get('evidence'):
+                problems.append('fail/warn without evidence: %s' % f.get('fid'))
+            if not f.get('recommendation'):
+                problems.append('no recommendation: %s' % f.get('fid'))
+        ok('findings schema valid (unique fids, enums, evidence, recommendations)',
+           not problems, '; '.join(problems[:3]) or 'clean')
+
     if 'memory_over_limit' in exp:
         fact = bool(rep['context_tax']['memory_over_limit'])
         ok(f'memory over limit = {exp["memory_over_limit"]}',

@@ -32,21 +32,21 @@ The scanner only reads. Deletions and edits always stay with the human.
 | Skills | descriptions over 1024 chars (the skill will not load), descriptions without triggers, drifted copies |
 | Hygiene | name-based junk (final/version/copy/old/temp, logs, drafts, `node_modules` and other build dirs, in English and Russian), hash-proven duplicates, files over 5 MB, empty folders |
 
-Everything rolls up into nine pass/fail gates. The ninth, "instruction changes are verified by a run", is beyond the scanner by nature: after instruction edits the skill offers a before/after measurement of auto-load weight plus a typical task run.
+Everything rolls up into nine gates with four statuses: pass, warn, fail and unknown. Unknown means the check could not run (missing data never reads as a pass). Gates and typed findings are separate: findings carry their own severity (critical/high/medium/low/info) and status. After instruction edits the skill still offers the old ninth-check practice: a before/after measurement of auto-load weight plus a typical task run.
 
 ## The nine gates
 
 | # | Gate | What fails it |
 |---|---|---|
-| 1 | One instruction file per level; duplicates are identical or a pointer | An AGENTS.md/CLAUDE.md pair at the same level that differs in content |
-| 2 | Auto-loaded context has no generic or overview blocks | Template phrases and overview sections in files the harness loads automatically |
-| 3 | All cross-references in instruction files resolve | Dead links, paths and commands |
-| 4 | Every folder has a decided fate; valuable data is under version control | Folders outside git, unclassified data, uncommitted work |
-| 5 | Auto-push only for personal storage; publishing requires confirmation | Push hooks without a confirmation step |
-| 6 | No keys in tracked files or URLs; secret scan in the commit chain | Token-like strings in the git index, credentials embedded in remote URLs, no secret scan before push |
-| 7 | Skills: descriptions with triggers under 1024 chars, no drifted copies | Over-limit or trigger-less descriptions; same skill name with different content |
-| 8 | Every rule has one owner file; copy drift excluded by design | The same rule maintained in several files |
-| 9 | Instruction changes are verified by a run, not a feeling (always MANUAL, the skill offers the measurement) | Edits to instruction files without a before/after auto-load measurement and a typical task run |
+| 1 | Workspace structure | A drifted AGENTS.md/CLAUDE.md pair at one level; nested repositories warn |
+| 2 | Configuration integrity | A config file that does not parse or has duplicate keys; finding no configs at all is a warn |
+| 3 | Rules consistency | Dead references and drifted pairs; boilerplate, files over 16 KB and chains over 32 768 bytes warn |
+| 4 | Directory ownership and discoverability | A heavy non-build directory outside every git repo; loose top-level folders warn |
+| 5 | Skills and agent capabilities | Missing or unparseable frontmatter, descriptions over 1024 chars, diverged copies; trigger-less descriptions warn |
+| 6 | Secrets and Git security | Exposed, staged or tracked secrets, credentials in remote URLs; absence of a secret-prevention hook is never a pass |
+| 7 | Git hygiene | A tracked file over 5 MB; dirty worktrees, missing .gitignore and duplicate checkouts warn |
+| 8 | Agent environment governance | Instructions maintained for a dead harness; duplicate keys in MCP configs |
+| 9 | Workspace health and maintainability | Junk plus build artifacts over 500 MB; classified junk, many empty dirs, occasional harnesses and large untracked files warn |
 
 ## Limits and thresholds
 

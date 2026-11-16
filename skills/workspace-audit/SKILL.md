@@ -26,7 +26,7 @@ The plugin runs a deterministic scanner and formats the report. It never deletes
 | Sync mechanics | `.git/hooks` flags (`add -A`, push, secret scan), sync commits in 30 days, `.gitignore` |
 | Secrets | files, `git grep --cached`, credentials in remote URLs; git history only with `--deep` |
 | Skills | load locations, description vs 1024 limit, triggers, duplicates by name and hash |
-| Verification | not automated: gate 9 is always MANUAL |
+| Verification | offered by the skill after instruction edits: auto-load weight before/after plus a typical task run |
 
 ## Rules
 
