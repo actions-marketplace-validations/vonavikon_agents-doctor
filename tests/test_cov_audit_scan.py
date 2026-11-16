@@ -332,7 +332,8 @@ class RichWorkspaceScan(AuditScanCase):
         self.assertIn(str(Path(mem).resolve()),
                      [f['path'] for f in tax['session_files']
                       if f['role'] == 'memory-index'])
-        self.assertEqual(tax['memory_over_lines'], [mem])
+        self.assertEqual(tax['memory_over_lines'],
+                         [str(Path(mem).resolve())])
         self.assertEqual(tax['memory_over_limit'], [])  # 250 short lines
 
     def test_chain_budget_counts_nested_agents_md(self):

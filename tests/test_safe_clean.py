@@ -667,7 +667,8 @@ class LostAccess(unittest.TestCase):
                       if f['path'] == 'locked/secret-ish.bin'])
         self.assertEqual(len(refused), 1)
         self.assertEqual([m['path'] for m in summary['moved']], ['fine.txt'])
-        self.assertTrue((self.ws / 'locked' / 'secret-ish.bin').is_file())
+        # is_file() under a mode-000 parent raises on POSIX: use os.path
+        self.assertTrue(os.path.isfile(self.ws / 'locked' / 'secret-ish.bin'))
         self.assertEqual((self.ws / 'locked' / 'secret-ish.bin').read_bytes(),
                          b'no access')
 
