@@ -29,6 +29,13 @@ import secret_scanner as secscan  # noqa: E402
 import enrich  # noqa: E402
 import gates as gates_engine  # noqa: E402
 
+def _exists(p):
+    """exists() that treats permission errors as absent (pathlib raises)."""
+    try:
+        return p.exists()
+    except OSError:
+        return False
+
 # --- thresholds and heuristics from the audit protocol ------------------------
 PROJECT_BENCH = 16 * 1024        # project instruction file: up to ~16 KB is achievable
 MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
@@ -147,7 +154,7 @@ def classify_remote(url):
 # --- block D: repositories ------------------------------------------------------
 
 def git_info(p):
-    if not (p / '.git').exists():
+    if not _exists(p / '.git'):
         return None
     info = {'remote': None, 'last_commit': None, 'dirty': [], 'untracked': []}
     rc, out = run_git(p, 'remote', 'get-url', 'origin')
@@ -169,7 +176,7 @@ def nested_repos(p):
     found = []
     for dp, dns, _fns in os.walk(p):
         dns[:] = [d for d in dns if d != '.git' and d not in BUILD_DIRS]
-        if dp != str(p) and (Path(dp) / '.git').exists():
+        if dp != str(p) and _exists(Path(dp) / '.git'):
             found.append(str(Path(dp).relative_to(p)))
             dns[:] = []
         if len(found) >= 10:
@@ -181,7 +188,7 @@ def nested_repos(p):
 
 def repo_extra(p, gi, deep=False):
     ex = {'branch': None, 'ahead_behind': None, 'remote_class': None,
-          'credentials_in_remote': False, 'gitignore': (p / '.gitignore').exists(),
+          'credentials_in_remote': False, 'gitignore': _exists(p / '.gitignore'),
           'hooks': [], 'sync_commits_last30': 0, 'tracked_secrets': [],
           'nested_repos': nested_repos(p)}
     rc, out = run_git(p, 'branch', '--show-current')
@@ -197,7 +204,7 @@ def repo_extra(p, gi, deep=False):
         ex['credentials_in_remote'] = bool(re.search(r'://[^/@\s]+@', url))
 
     hooks_dir = p / '.git' / 'hooks'
-    if hooks_dir.exists():
+    if _exists(hooks_dir):
         for f in sorted(hooks_dir.iterdir()):
             if not f.is_file() or f.name.endswith('.sample'):
                 continue
@@ -232,13 +239,13 @@ def harness_report(home, root):
     now = time.time()
     for tool, cfg in HARNESS.items():
         d = home / cfg['dir']
-        if not d.exists():
+        if not _exists(d):
             tools.append({'tool': tool, 'path': str(d), 'exists': False, 'reads': cfg['reads']})
             continue
         mtimes = [d.stat().st_mtime]
         for mk in cfg['markers']:
             f = d / mk
-            if f.exists():
+            if _exists(f):
                 mtimes.append(f.stat().st_mtime)
         try:
             for ch in os.scandir(d):
@@ -250,7 +257,7 @@ def harness_report(home, root):
             'abandoned' if days > HARNESS_STALE_DAYS else 'occasional')
         tools.append({'tool': tool, 'exists': True, 'last_activity_days_ago': round(days),
                       'state': state, 'reads': cfg['reads']})
-    proj = [{'name': n, 'exists': (root / n).exists()}
+    proj = [{'name': n, 'exists': _exists(root / n)}
             for n in ['.agents', '.claude', '.codex', '.zcode/config.json']]
     return {'tools': tools, 'project_dirs': proj, 'notes': []}
 
@@ -259,17 +266,17 @@ def context_checks(d, base, origin='project'):
     files = {}
     for name in ('AGENTS.md', 'CLAUDE.md'):
         f = d / name
-        if f.exists():
+        if _exists(f):
             files[name] = f.read_text(encoding='utf-8', errors='replace')
 
     pkg_scripts = None
     pkg = d / 'package.json'
-    if pkg.exists():
+    if _exists(pkg):
         try:
             pkg_scripts = json.loads(pkg.read_text(encoding='utf-8')).get('scripts', {})
         except (ValueError, OSError):
             pkg_scripts = {}
-    has_makefile = (d / 'Makefile').exists() or (d / 'makefile').exists()
+    has_makefile = _exists(d / 'Makefile') or _exists(d / 'makefile')
 
     entries = []
     for name, text in files.items():
@@ -281,14 +288,14 @@ def context_checks(d, base, origin='project'):
         dead_links, dead_paths, dead_cmds = [], [], []
         for m in re.finditer(r'\[[^\]]*\]\(([^)\s]+)\)', text):
             ref = m.group(1).split('#')[0]
-            if ref and not ref.startswith(('http', 'mailto:')) and not (d / ref).exists():
+            if ref and not ref.startswith(('http', 'mailto:')) and not _exists(d / ref):
                 dead_links.append(ref)
         for m in re.finditer(r'`([^`\s]+)`', text):
             raw = m.group(1).strip('`')
             if '/' not in raw or raw.startswith(('http', '~', '$', '-')):
                 continue
             tok = raw.rstrip('/')
-            if re.fullmatch(r'[\w.\\/-]+', tok) and not (d / tok).exists():
+            if re.fullmatch(r'[\w.\\/-]+', tok) and not _exists(d / tok):
                 dead_paths.append(tok)
         for m in re.finditer(r'\bnpm run ([\w:-]+)', text):
             if pkg_scripts is not None and m.group(1) not in pkg_scripts:
@@ -327,11 +334,11 @@ def context_tax(home, root):
     for role, p in [('user-zcode', home / '.zcode' / 'AGENTS.md'),
                     ('user-claude', home / '.claude' / 'CLAUDE.md'),
                     ('project', root / 'AGENTS.md'), ('project', root / 'CLAUDE.md')]:
-        if p.exists():
+        if _exists(p):
             files.append({'role': role, 'path': str(p), 'size_bytes': p.stat().st_size})
     mem_dir = home / '.zcode' / 'cli' / 'memories'
     over_lines = []
-    if mem_dir.exists():
+    if _exists(mem_dir):
         for m in list(mem_dir.rglob('MEMORY.md'))[:20]:
             files.append({'role': 'memory-index', 'path': str(m),
                           'size_bytes': m.stat().st_size})
@@ -376,7 +383,7 @@ def skills_report(home, root):
     found = []
     checked = []
     for loc, base, mode in locs:
-        if not base.exists():
+        if not _exists(base):
             continue
         checked.append(f'{loc}: {base}')
         if mode == 'one':
@@ -483,7 +490,7 @@ def chain_budget(root):
     out = []
     for tree in trees:
         main = tree / 'AGENTS.md'
-        if not main.exists():
+        if not _exists(main):
             continue
         total = main.stat().st_size
         for dp, dns, _fns in os.walk(tree):
@@ -491,7 +498,7 @@ def chain_budget(root):
             if dp == str(tree):
                 continue
             nested = Path(dp) / 'AGENTS.md'
-            if nested.exists():
+            if _exists(nested):
                 total += nested.stat().st_size
         out.append({'root': str(tree.relative_to(root)) or '.',
                     'total_bytes': total, 'over': total > CHAIN_BUDGET})
@@ -605,12 +612,16 @@ def scan(root, home, deep=False):
                     remotes.setdefault(key, []).append(entry.name)
             rep['top_level'].append(item)
         else:
+            try:
+                fsize = entry.stat().st_size
+            except OSError:
+                fsize = 0  # symlink to an inaccessible target: metadata only
             rep['top_level'].append({'name': entry.name, 'kind': 'file',
-                                     'size_bytes': entry.stat().st_size})
+                                     'size_bytes': fsize})
     rep['dup_checkouts'] = {u: names for u, names in remotes.items() if len(names) > 1}
 
     proj_ctx_dirs = [e for e in sorted(root.iterdir())
-                     if e.is_dir() and ((e / 'AGENTS.md').exists() or (e / 'CLAUDE.md').exists())]
+                     if e.is_dir() and (_exists(e / 'AGENTS.md') or _exists(e / 'CLAUDE.md'))]
     for d, base, origin in [(root, root, 'project'),
                             (home / '.zcode', home, 'home'),
                             (home / '.claude', home, 'home')] + \
@@ -695,7 +706,7 @@ def main():
     if not root.is_dir():
         sys.exit('not a directory: ' + str(root))
     rep = scan(root, home, a.deep)
-    if a.baseline and Path(a.baseline).exists():
+    if a.baseline and _exists(Path(a.baseline)):
         try:
             old = json.loads(Path(a.baseline).read_text(encoding='utf-8'))
         except (ValueError, OSError):

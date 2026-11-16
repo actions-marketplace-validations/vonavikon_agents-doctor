@@ -176,6 +176,14 @@ def config_integrity(root, repo_dirs):
 
 # --- 2) heavy directories outside any git repo ----------------------------------
 
+def _exists(p):
+    """exists() that treats permission errors as absent (pathlib raises)."""
+    try:
+        return p.exists()
+    except OSError:
+        return False
+
+
 def _tree_size(p):
     """Recursive size of a directory; symlinks are never followed."""
     total = 0
@@ -203,7 +211,7 @@ def heavy_outside_git(root):
     """
     root = Path(root)
     found = []
-    if (root / '.git').exists():
+    if _exists(root / '.git'):
         return found
 
     level = [root]
@@ -224,7 +232,7 @@ def heavy_outside_git(root):
                         or _dir_junk_reason(ent.name)):
                     continue
                 p = Path(ent.path)
-                if (p / '.git').exists():
+                if _exists(p / '.git'):
                     continue  # repo root: the whole subtree is inside git
                 size = _tree_size(p)
                 if size > HEAVY_MIN_BYTES:
@@ -246,7 +254,7 @@ def _nearest_repo(p, root):
     cur = Path(p)
     root = Path(root)
     while True:
-        if (cur / '.git').exists():
+        if _exists(cur / '.git'):
             return cur
         if cur == root or cur.parent == cur:
             return None
@@ -296,7 +304,7 @@ def classify_junk(root, junk_candidates, reference_texts):
         rel = str(cand.get('path', ''))
         p = root / rel
         size = cand.get('size_bytes')
-        exists = p.exists()
+        exists = _exists(p)
 
         tracked = None
         if exists:
@@ -500,7 +508,7 @@ def _dead_refs(text, skill_dir):
         if not ref or ref in seen:
             continue
         seen.add(ref)
-        if not (skill_dir / ref).exists():
+        if not _exists(skill_dir / ref):
             missing.append(ref)
             if len(missing) >= 5:
                 break
