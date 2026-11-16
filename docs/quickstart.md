@@ -9,6 +9,10 @@ As a Claude Code / Z Code plugin:
 /plugin install workspace-audit@workspace-audit
 ```
 
+Installed as a plugin, the agent resolves the script locations itself
+(`${CLAUDE_PLUGIN_ROOT}` in Claude Code, the skill directory in Z Code);
+the standalone commands below assume a checkout of this repository.
+
 Then tell the agent "run a workspace audit" and name a folder if the
 current one is not the target.
 

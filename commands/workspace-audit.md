@@ -9,10 +9,25 @@ folders could be the audit root, ask the user first. The scanner is
 read-only; secrets stay masked in every output; nothing is ever deleted in
 bulk.
 
+## Locating the scripts (do this first)
+
+The entry scripts live at `<PLUGIN_ROOT>/skills/workspace-audit/scripts/`.
+Resolve `<PLUGIN_ROOT>` exactly one of these ways, in order:
+
+1. Claude Code command context: the `${CLAUDE_PLUGIN_ROOT}` variable (use it
+   directly in the commands below).
+2. Otherwise: the plugin root is the parent directory of the folder that
+   contains this command file (`commands/` lives at the plugin root).
+3. If neither is knowable, ask the user for the installed plugin location;
+   never search the current project for the scripts.
+
+Replace `${CLAUDE_PLUGIN_ROOT}` below with the resolved value. All scripts
+work from any current directory: they resolve their own dependencies.
+
 ## `human` (for non-technical readers)
 
 Generate the plain-language value report from the last scan (or run a fresh
-one first): `python skills/workspace-audit/scripts/report_human.py <scan.json> --lang en|ru [--after <scan2.json>]`.
+one first): `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/report_human.py <scan.json> --lang en|ru [--after <scan2.json>]`.
 It answers, in human words: what is wrong, what it costs (extra tokens every
 session with the assumption printed, disk space, secrets left in plain
 sight), and — after a cleanup, with `--after` — what got better. Post a
@@ -21,7 +36,7 @@ clean` as the next step for users who want action without reading reports.
 
 ## `clean` (safe cleanup for non-technical users)
 
-Run the guided cleanup wizard: `python skills/workspace-audit/scripts/safe_clean.py <root>`.
+Run the guided cleanup wizard: `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/safe_clean.py <root>`.
 Walk the user through it. Rules the agent must keep: show the preview
 categories and sizes in plain words; the fixed "will NOT touch" line is
 non-negotiable (tracked files, files with keys, anything the audit is
@@ -55,7 +70,7 @@ produced, only the reporting filters.
 If the stage-4 CLI entry is present, offer the deterministic focus first:
 
 ```
-python skills/workspace-audit/scripts/workspace_audit.py audit <root> --focus security
+python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/workspace_audit.py audit <root> --focus security
 ```
 
 If it is not available, filter the JSON yourself: keep the gates of the
@@ -67,7 +82,7 @@ and drop the other report sections.
 Run the audit with a baseline against the previous scan:
 
 ```
-python skills/workspace-audit/scripts/audit_scan.py <root> --home <home> \
+python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/audit_scan.py <root> --home <home> \
     --baseline <root>/workspace-audit-scan.json --out <root>/workspace-audit-scan-new.json
 ```
 
@@ -94,7 +109,7 @@ into a value. If the fid does not exist, list the fids that do.
 Remediation is plan-only first, always:
 
 1. Produce the plan without touching anything:
-   `python skills/workspace-audit/scripts/remediate.py <scan.json> --fid <fid>`
+   `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/remediate.py <scan.json> --fid <fid>`
 2. Show the plan to the user: what will be moved where, what command would
    be run, what stays untouched.
 3. Ask for an explicit confirmation ("apply"). A vague or missing answer

@@ -117,6 +117,10 @@ def fingerprint(value):
 
 def main(argv=None):
     argv = list(sys.argv[1:]) if argv is None else list(argv)
+    if argv in (['--help'], ['-h'], []):
+        print('usage: python fingerprint.py --check\n'
+              '  --check  verify the local key and print a sample fingerprint')
+        return 0
     if argv != ['--check']:
         print('usage: python fingerprint.py --check', file=sys.stderr)
         return 1
