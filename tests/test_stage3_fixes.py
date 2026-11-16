@@ -30,7 +30,10 @@ def force_rmtree(p):
     def _onexc(func, path, _exc):
         os.chmod(path, stat.S_IWRITE)
         func(path)
-    shutil.rmtree(p, onexc=_onexc)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(p, onexc=_onexc)
+    else:
+        shutil.rmtree(p, onerror=lambda func, p, _ei: _onexc(func, p, _ei))
 
 
 class SkillMetaPathFallback(unittest.TestCase):

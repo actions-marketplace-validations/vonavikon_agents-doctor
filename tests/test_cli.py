@@ -34,7 +34,10 @@ def force_rmtree(path):
     def _onexc(func, p, _exc):
         os.chmod(p, stat.S_IWRITE)
         func(p)
-    shutil.rmtree(path, onexc=_onexc)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_onexc)
+    else:
+        shutil.rmtree(path, onerror=lambda func, p, _ei: _onexc(func, p, _ei))
 
 
 def build_workspace(base):
