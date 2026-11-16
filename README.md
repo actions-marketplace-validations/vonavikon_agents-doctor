@@ -18,6 +18,9 @@ The scanner only reads. Deletions and edits always stay with the human.
 - Filesystem boundary: file and directory symlinks pointing outside the workspace root are skipped and counted in `stats.skipped_symlinks_outside`.
 - Git runs with `GIT_OPTIONAL_LOCKS=0`: the audit cannot refresh or modify the index.
 - The scanner writes exactly one file: the report path passed via `--out`.
+- Git remote URLs are sanitized at the source: userinfo and credential query parameters never reach any artifact; detection happens on the raw value before it is dropped.
+- Fingerprints are HMAC-SHA256 with a per-installation key stored under your user config dir (never in reports, never sent to a model; `python skills/workspace-audit/scripts/fingerprint.py --check` verifies it). Older baselines will show a one-time all-new/all-resolved diff after the format change.
+- Deep history scanning is bounded and honest: `--history-depth N` caps it, `--history-all-refs` widens it, and an incomplete or unrequested history scan reads as `unknown`, never as a pass.
 
 ## What it checks
 
@@ -132,7 +135,7 @@ Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix
 cd qa && python eval.py
 ```
 
-Three scenario fixtures with expected results locked in `expected.json` before the run; the runner compares the scanner's actual JSON against the expected one and writes a report. Current result: 71/71. Latest report: `qa/QA-EVAL-*.md`.
+Three scenario fixtures with expected results locked in `expected.json` before the run; the runner compares the scanner's actual JSON against the expected one and writes a report. Current result: 77/77 (plus a 360+ test unit/integration/security suite; see `qa/QA-EVAL-*.md`).
 
 The deterministic core also has a unit and security-regression suite:
 
@@ -140,7 +143,7 @@ The deterministic core also has a unit and security-regression suite:
 python -m unittest discover -s tests
 ```
 
-23 tests, including canary-secrets redaction across worktree/staged/tracked/history artifacts and a read-only git-index check.
+The suite includes canary-secrets redaction across worktree/staged/tracked/history artifacts, remote-URL sanitization e2e, a read-only git-index check, runtime-path smoke from a foreign cwd, and trash manifest/restore round-trips. Per-module coverage floors are enforced in CI (secret scanner 95%, core modules 90%).
 
 ## Methodology
 

@@ -4,7 +4,7 @@ All notable changes to workspace-audit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
-## [Unreleased] (v0.7.0 stages 1+3: security hardening)
+## [0.7.0] - 2026-11-16 (unreleased candidate)
 
 ### Security
 
@@ -28,6 +28,43 @@ follow semantic versioning.
   commits_scanned/commits_total reported per repo; an incomplete or
   unrequested history scan makes G6 `unknown`, never pass; history
   secrets now raise critical findings.
+
+### Stage 4 — cleanup and remediation hardening
+
+- `trashops.py`: TOCTOU re-stat before every operation (changed files abort
+  with a reason), collision-safe trash destinations, per-run operation ids,
+  write-ahead `manifest.json` per trash run, interrupted-run detection,
+  and a `restore` command with reverse collision handling.
+- `safe_clean.py` / `remediate.py` run all moves through trashops; the
+  summary prints the run dir, manifest path and the exact restore command.
+  Coverage: safe_clean 94%, remediate 95%, trashops 90%.
+
+### Stage 5 — performance
+
+- `--profile` stage timings; scandir-based traversal with DirEntry stats
+  (zero per-file path stats); duplicates hashed only within size-collision
+  groups, two-stage (4 KB head, then full); one shared, 8-thread read pass
+  for duplicate sampling and secret scanning (one open per file).
+- Local Windows, same workspaces: medium (11,964 files) 123.0 s -> 21.4 s,
+  large (59,634 files) 581.9 s -> 82.2 s; results byte-identical before
+  and after (files, junk, duplicates, secrets, gates).
+- CI gains a windows benchmark job with wall targets (small <=10 s,
+  medium <=60 s) alongside the linux one.
+
+### Stage 6 — LLM evaluation
+
+- `llm-eval/run_eval.py`: offline / online / replay runner over frozen
+  fixtures; OpenAI-compatible adapter (stdlib urllib); adversarial fixture
+  generator (conflicting instructions, injected markers, unknown-heavy,
+  malformed input); automated R1-R7 grading plus input validation; runs
+  offline in CI with zero network.
+
+### Stage 7 — packaging, docs, QA
+
+- Release zip built from an explicit allowlist and verified against it
+  (no tests/bench/CI files inside); per-module coverage floors in CI
+  (secret_scanner 95, core modules 90); link check and offline llm-eval
+  as CI jobs; README/CLI/configuration docs synced with actual numbers.
 
 ## [0.6.0] - 2026-11-16
 

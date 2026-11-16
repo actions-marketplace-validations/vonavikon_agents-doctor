@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -81,7 +81,8 @@ class RemediateCase(unittest.TestCase):
 
     def apply_quiet(self, steps, root, **kw):
         out = StringIO()
-        with redirect_stdout(out):
+        err = StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
             report = remediate.apply_plan(steps, str(root), **kw)
         return report
 
@@ -215,7 +216,8 @@ class Confirmation(RemediateCase):
                         side_effect=AssertionError('prompted on empty plan')):
             report = self.apply_quiet([], self.ws)
         self.assertEqual(report, {'executed': [], 'failed': [],
-                                  'skipped': [], 'declined': False})
+                                  'skipped': [], 'declined': False,
+                                  'trash_run': None, 'opid': None})
 
 
 class Reaudit(RemediateCase):
@@ -231,6 +233,366 @@ class Reaudit(RemediateCase):
         self.assertTrue(any('empty' in f['path'] for f in diff['resolved']),
                         diff['resolved'])
         self.assertEqual(new_rep['junk']['empty_dirs'], [])
+
+
+# --- stage 4: trashops-backed moves, TOCTOU, crash recovery -----------------------
+
+import json  # noqa: E402  (manifest checks)
+
+import trashops  # noqa: E402
+
+
+def unused_data_rep(ws, *rels):
+    """A hand-crafted confirmed-unused finding for the given paths."""
+    return {'root': str(ws), 'findings_detailed': [{
+        'fid': 'HLTH-042', 'gate': 'G9', 'category': 'health',
+        'severity': 'low', 'status': 'warn',
+        'title': 'Unused data (confirmed_unused): %s' % ', '.join(rels),
+        'description': 'fabricated for stage-4 tests', 'confidence': 0.9,
+        'evidence': [{'path': r} for r in rels],
+        'recommendation': 'x', 'autofix_available': True}]}
+
+
+class TrashRunManifest(RemediateCase):
+    def test_trash_move_records_manifest_and_opid(self):
+        junk = self.ws / 'temp-data.txt'
+        junk.write_text('stale junk\n', encoding='utf-8')
+        old = time.time() - 100 * 86400
+        os.utime(junk, (old, old))
+        rep = unused_data_rep(self.ws, 'temp-data.txt')
+        steps = remediate.plan(rep, 'HLTH-042')
+        self.assertIn('snapshot', steps[0])
+        self.assertEqual(steps[0]['snapshot']['type'], 'file')
+
+        report = self.apply_quiet(steps, self.ws, assume_yes=True)
+        self.assertEqual(len(report['executed']), 1)
+
+        run_dir = Path(report['trash_run'])
+        self.assertRegex(run_dir.name, r'^\d{8}-\d{6}-[0-9a-f]{8}$')
+        self.assertEqual(run_dir.name.split('-')[-1], report['opid'])
+        data = json.loads((run_dir / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(data['tool'], 'remediate')
+        self.assertEqual(data['opid'], report['opid'])
+        self.assertEqual(data['totals']['moved'], 1)
+        self.assertEqual(len(data['entries']), 1)
+        entry = data['entries'][0]
+        self.assertEqual(entry['original_path'], 'temp-data.txt')
+        self.assertEqual(entry['status'], 'moved')
+        self.assertTrue(entry['restorable'])
+        self.assertEqual((run_dir / entry['trash_path']).read_text(
+            encoding='utf-8'), 'stale junk\n')
+
+
+class ToctouRespect(RemediateCase):
+    def test_dir_gained_file_between_plan_and_apply_skipped_changed(self):
+        rep = self.scan()
+        fid = self.fid_for(rep, 'empty directories')
+        steps = remediate.plan(rep, fid)
+        (self.repo / 'empty' / 'new-tenant.txt').write_text('x', encoding='utf-8')
+
+        report = self.apply_quiet(steps, self.ws, assume_yes=True)
+
+        self.assertEqual(report['executed'], [])
+        self.assertEqual(report['failed'], [])
+        self.assertEqual(report['skipped'],
+                         [{'action': 'rmdir',
+                           'target': str((self.repo / 'empty').resolve()),
+                           'reason': 'changed'}])
+        self.assertTrue((self.repo / 'empty' / 'new-tenant.txt').is_file())
+
+    def test_file_modified_between_plan_and_apply_skipped_changed(self):
+        junk = self.ws / 'temp-data.txt'
+        junk.write_text('stale junk\n', encoding='utf-8')
+        old = time.time() - 100 * 86400
+        os.utime(junk, (old, old))
+        rep = unused_data_rep(self.ws, 'temp-data.txt')
+        steps = remediate.plan(rep, 'HLTH-042')
+        junk.write_text('stale junk, edited after planning\n', encoding='utf-8')
+
+        report = self.apply_quiet(steps, self.ws, assume_yes=True)
+
+        self.assertEqual(report['executed'], [])
+        self.assertEqual(report['skipped'][0]['reason'], 'changed')
+        self.assertTrue(junk.is_file())
+        self.assertFalse((self.ws / remediate.TRASH_DIR_NAME).exists())
+
+
+class BatchContinues(RemediateCase):
+    def test_first_move_failing_second_still_moves(self):
+        for name in ('temp-a.txt', 'temp-b.txt'):
+            f = self.ws / name
+            f.write_text('junk %s\n' % name, encoding='utf-8')
+            old = time.time() - 100 * 86400
+            os.utime(f, (old, old))
+        rep = unused_data_rep(self.ws, 'temp-a.txt', 'temp-b.txt')
+        steps = remediate.plan(rep, 'HLTH-042')
+        order = []
+        real_move = shutil.move
+
+        def move_spy(src, dst):
+            order.append(Path(src).name)
+            if Path(src).name == 'temp-a.txt':
+                raise OSError('simulated failure on the first item')
+            return real_move(src, dst)
+
+        with mock.patch('shutil.move', side_effect=move_spy):
+            report = self.apply_quiet(steps, self.ws, assume_yes=True)
+
+        self.assertEqual(order, ['temp-a.txt', 'temp-b.txt'])
+        self.assertTrue(all(f['target'].endswith('temp-a.txt')
+                            for f in report['failed']))
+        self.assertEqual(len(report['failed']), 1)
+        self.assertTrue((self.ws / 'temp-a.txt').is_file())   # left in place
+        self.assertFalse((self.ws / 'temp-b.txt').exists())   # moved anyway
+        moved = list((self.ws / remediate.TRASH_DIR_NAME).rglob('temp-b.txt'))
+        self.assertEqual(len(moved), 1)
+
+        data = json.loads((Path(report['trash_run']) / 'manifest.json')
+                          .read_text(encoding='utf-8'))
+        by_path = {e['original_path']: e for e in data['entries']}
+        self.assertEqual(by_path['temp-a.txt']['status'], 'failed')
+        self.assertEqual(by_path['temp-b.txt']['status'], 'moved')
+
+
+class InterruptedRunNoted(RemediateCase):
+    def test_interrupted_earlier_run_recorded_in_new_manifest(self):
+        old_run = self.ws / remediate.TRASH_DIR_NAME / '20250101-000000-aaaabbbb'
+        old_run.mkdir(parents=True)
+        (old_run / 'manifest.json').write_text(json.dumps({
+            'opid': 'aaaabbbb', 'root': str(self.ws), 'tool': 'remediate',
+            'entries': [{'opid': 'aaaabbbb', 'action': 'trash',
+                         'original_path': 'x', 'trash_path': 'x',
+                         'status': 'moving'}]}), encoding='utf-8')
+
+        junk = self.ws / 'temp-data.txt'
+        junk.write_text('stale junk\n', encoding='utf-8')
+        old = time.time() - 100 * 86400
+        os.utime(junk, (old, old))
+        rep = unused_data_rep(self.ws, 'temp-data.txt')
+        steps = remediate.plan(rep, 'HLTH-042')
+        report = self.apply_quiet(steps, self.ws, assume_yes=True)
+
+        data = json.loads((Path(report['trash_run']) / 'manifest.json')
+                          .read_text(encoding='utf-8'))
+        self.assertEqual(data['interrupted_run'], 'aaaabbbb')
+        # the interrupted run dir is still exactly as it was
+        self.assertEqual(list(old_run.iterdir()), [old_run / 'manifest.json'])
+
+
+class PlanBranches(RemediateCase):
+    """Guard branches of plan() driven by hand-crafted findings."""
+
+    def finding(self, **kw):
+        f = {'fid': 'HLTH-042', 'gate': 'G9', 'category': 'health',
+             'severity': 'low', 'status': 'warn', 'title': 'x',
+             'description': 'd', 'evidence': [], 'recommendation': 'r',
+             'autofix_available': False}
+        f.update(kw)
+        return f
+
+    def test_confirmed_unused_without_autofix_refused(self):
+        rep = {'root': str(self.ws),
+               'findings_detailed': [self.finding(
+                   title='Unused data (confirmed_unused): x',
+                   evidence=[{'path': 'temp-data.txt'}])]}
+        with self.assertRaises(remediate.UnsupportedError) as cm:
+            remediate.plan(rep, 'HLTH-042')
+        self.assertIn('autofix_available', str(cm.exception))
+
+    def test_evidence_without_path_or_already_gone_targets_skipped(self):
+        rep = {'root': str(self.ws),
+               'findings_detailed': [self.finding(
+                   title='Unused data (confirmed_unused): misc',
+                   autofix_available=True,
+                   evidence=[{}, {'path': ''}, {'path': 'never-existed.txt'}])]}
+        self.assertEqual(remediate.plan(rep, 'HLTH-042'), [])
+
+    def test_gitignore_repo_name_from_title_regex(self):
+        # evidence carries no repo key -> the title regex names the repo
+        (self.ws / 'solo').mkdir()
+        rep = {'root': str(self.ws),
+               'findings_detailed': [self.finding(
+                   fid='GIT-007', title='No .gitignore in solo',
+                   evidence=[{'note': 'no repo key here'}])]}
+        steps = remediate.plan(rep, 'GIT-007')
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(Path(steps[0]['target']),
+                         (self.ws / 'solo' / '.gitignore').resolve())
+
+    def test_gitignore_cannot_tell_repo_refused(self):
+        # the prefix matches but no repo name follows, and the evidence
+        # carries no repo key either
+        rep = {'root': str(self.ws),
+               'findings_detailed': [self.finding(
+                   fid='GIT-007', title='No .gitignore in ',
+                   evidence=[])]}
+        with self.assertRaises(remediate.UnsupportedError) as cm:
+            remediate.plan(rep, 'GIT-007')
+        self.assertIn('cannot tell which repository', str(cm.exception))
+
+    def test_empty_dir_evidence_degenerate_entries_skipped(self):
+        (self.ws / 'full').mkdir()
+        (self.ws / 'full' / 'x.txt').write_text('x', encoding='utf-8')
+        (self.ws / 'really-empty').mkdir()
+        rep = {'root': str(self.ws),
+               'findings_detailed': [self.finding(
+                   title='3 empty directories',
+                   evidence=[{}, {'path': 'full'},
+                             {'path': 'not-a-dir.txt'},
+                             {'path': 'really-empty'}])]}
+        steps = remediate.plan(rep, 'HLTH-042')
+        self.assertEqual([Path(s['target']).name for s in steps],
+                         ['really-empty'])
+
+    def test_rel_under_falls_back_to_plain_string_outside_root(self):
+        outside = self.base / 'elsewhere.txt'
+        self.assertEqual(remediate._rel_under(outside, self.ws),
+                         str(outside))
+
+
+class ApplyEdgeCases(RemediateCase):
+    def test_gitignore_missing_parent_fails_loudly(self):
+        step = {'action': 'write_gitignore',
+                'target': str(self.ws / 'no-such-repo' / '.gitignore'),
+                'command': 'write', 'reversible': True, 'note': ''}
+        report = self.apply_quiet([step], self.ws, assume_yes=True)
+        self.assertEqual(report['executed'], [])
+        self.assertEqual(len(report['failed']), 1)
+        self.assertIn('parent directory missing', report['failed'][0]['error'])
+
+    def test_trash_move_source_missing_fails(self):
+        step = {'action': 'trash_move',
+                'target': str(self.ws / 'vanished.txt'),
+                'command': 'move', 'reversible': True, 'note': ''}
+        report = self.apply_quiet([step], self.ws, assume_yes=True)
+        self.assertEqual(len(report['failed']), 1)
+        self.assertIn('source missing', report['failed'][0]['error'])
+
+    def test_unknown_action_fails(self):
+        step = {'action': 'shred', 'target': str(self.ws),
+                'command': 'x', 'reversible': False, 'note': ''}
+        report = self.apply_quiet([step], self.ws, assume_yes=True)
+        self.assertEqual(len(report['failed']), 1)
+        self.assertIn('unknown action', report['failed'][0]['error'])
+        self.assertTrue(self.ws.is_dir())
+
+    def test_eof_on_prompt_declines(self):
+        (self.ws / 'emptydir').mkdir()
+        step = {'action': 'rmdir', 'target': str(self.ws / 'emptydir'),
+                'command': 'rmdir', 'reversible': True, 'note': ''}
+        with mock.patch('builtins.input', side_effect=EOFError):
+            report = self.apply_quiet([step], self.ws)
+        self.assertTrue(report['declined'])
+        self.assertTrue((self.ws / 'emptydir').is_dir())
+
+
+class FingerprintDiffEdges(unittest.TestCase):
+    def test_changed_and_degenerate_inputs(self):
+        old = [{'fp': 'a', 'section': 'S', 'path': 'p'},
+               {'fp': 'z', 'section': 'S2', 'path': 'q'},
+               'not-a-dict', {'no-fp': 1}]
+        new = [{'fp': 'b', 'section': 'S', 'path': 'p'},   # changed
+               {'fp': 'a', 'section': 'S', 'path': 'p'},   # persisting dup
+               {'fp': 'n', 'section': 'S3', 'path': 'r'},  # new
+               None]
+        diff = remediate.fingerprint_diff(old, new)
+        self.assertEqual([f['fp'] for f in diff['changed']], ['b'])
+        self.assertIn('b', [f['fp'] for f in diff['new']])
+        self.assertEqual([f['fp'] for f in diff['resolved']], ['z'])
+        self.assertIn('a', [f['fp'] for f in diff['persisting']])
+
+
+class Cli(RemediateCase):
+    def run_main(self, *args):
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = remediate.main([str(a) for a in args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def junk_finding_scan(self):
+        junk = self.ws / 'temp-cli.txt'
+        junk.write_text('stale junk\n', encoding='utf-8')
+        old = time.time() - 100 * 86400
+        os.utime(junk, (old, old))
+        self.scan()
+        return self.fid_for(self.rep, 'Unused data (confirmed_unused)')
+
+    def test_dry_run_prints_plan_and_changes_nothing(self):
+        fid = self.junk_finding_scan()
+        rc, out, err = self.run_main(self.scan_path, fid)
+        self.assertEqual(rc, 0, err)
+        self.assertIn('fix plan for %s' % fid, out)
+        self.assertIn('trash_move', out)
+        self.assertIn('dry run', out)
+        self.assertTrue((self.ws / 'temp-cli.txt').is_file())
+
+    def test_apply_confirmed_executes_and_reports_trash_run(self):
+        fid = self.junk_finding_scan()
+        with mock.patch('builtins.input', return_value='yes'):
+            rc, out, err = self.run_main(self.scan_path, fid, '--apply')
+        self.assertEqual(rc, 0, err)
+        self.assertIn('executed 1', out)
+        self.assertIn('trash run:', out)
+        self.assertIn('safe_clean.py restore', out)
+        self.assertFalse((self.ws / 'temp-cli.txt').exists())
+
+    def test_apply_declined_exit_zero(self):
+        fid = self.junk_finding_scan()
+        with mock.patch('builtins.input', return_value='no'):
+            rc, out, _ = self.run_main(self.scan_path, fid, '--apply')
+        self.assertEqual(rc, 0)
+        self.assertIn('declined, nothing executed', out)
+        self.assertTrue((self.ws / 'temp-cli.txt').is_file())
+
+    def test_apply_with_failing_step_returns_one(self):
+        fid = self.junk_finding_scan()
+        with mock.patch('builtins.input', return_value='yes'), \
+                mock.patch('shutil.move', side_effect=OSError('boom')):
+            rc, out, err = self.run_main(self.scan_path, fid, '--apply')
+        self.assertEqual(rc, 1)
+        self.assertIn('executed 0', out)
+        self.assertIn('boom', err)
+        self.assertTrue((self.ws / 'temp-cli.txt').is_file())
+
+    def test_unsupported_finding_exit_three(self):
+        self.scan()
+        rc, _, err = self.run_main(self.scan_path, 'SEC-001')
+        self.assertEqual(rc, 3)
+        self.assertIn('SEC-001', err)
+
+    def test_unreadable_scan_exit_one(self):
+        rc, _, err = self.run_main(self.base / 'missing.json', 'HLTH-1')
+        self.assertEqual(rc, 1)
+        self.assertIn('cannot read scan', err)
+
+    def test_scan_without_root_exit_one(self):
+        p = self.base / 'rootless.json'
+        p.write_text(json.dumps({'findings_detailed': []}), encoding='utf-8')
+        rc, _, err = self.run_main(p, 'HLTH-1')
+        self.assertEqual(rc, 1)
+        self.assertIn('no root', err)
+
+    def test_root_flag_overrides_scan_root(self):
+        # scan records the real ws; --root points at a copy with the
+        # same relative layout, so planning targets the copy
+        other = self.base / 'other-ws'
+        other.mkdir()
+        (other / 'temp-cli.txt').write_text('stale junk\n', encoding='utf-8')
+        fid = self.junk_finding_scan()
+        rc, out, err = self.run_main(self.scan_path, fid,
+                                     '--root', other)
+        self.assertEqual(rc, 0, err)
+        self.assertIn(str(other / 'temp-cli.txt'), out)
+
+    def test_reaudit_after_apply(self):
+        self.scan()
+        fid = self.fid_for(self.rep, 'empty directories')
+        with mock.patch('builtins.input', return_value='yes'):
+            rc, out, err = self.run_main(self.scan_path, fid,
+                                         '--apply', '--reaudit')
+        self.assertEqual(rc, 0, err)
+        self.assertIn('reaudit:', out)
+        self.assertTrue((self.base / 'scan.after.json').is_file())
 
 
 if __name__ == '__main__':

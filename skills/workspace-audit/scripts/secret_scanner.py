@@ -24,9 +24,6 @@ for _r in RULES:
 # POSIX ERE for `git grep -i -E` — generated from the same rule table.
 GIT_GREP_RE = secret_rules.GIT_GREP_RE_COMBINED
 
-# Kept for import compatibility; no longer used (HMAC replaced salted sha256).
-SALT = 'workspace-audit-v1'
-
 REDACTED = '[REDACTED]'
 
 # `git grep -n` line: path:line:content. The non-greedy path group plus a

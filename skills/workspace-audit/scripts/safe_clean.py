@@ -33,54 +33,65 @@ the size cap (500 MB hard ceiling; --max-bytes can lower it, never
 raise it), and the trash folder itself.
 
 Everything deletable goes to <root>/.workspace-audit-trash/
-<YYYYmmdd-HHMMSS>/<relative-path> first, via shutil.move. Only truly
-empty directories are removed in place. The trash is never emptied
-automatically; the CLI prints its path and how to restore.
+<YYYYmmdd-HHMMSS>-<opid>/<relative-path> first, via shutil.move (see
+trashops.py: per-run operation id, write-ahead manifest.json, crash
+recovery, collision suffixing). Only truly empty directories are
+removed in place. The trash is never emptied automatically; the CLI
+prints the run directory, the manifest and the exact restore command.
 
 Programmatic API (tests drive these directly):
 - build_plan(rep, include_cautious=False, max_bytes=DEFAULT_MAX_BYTES)
   -> plan dict {root, max_bytes, include_cautious, items[{path, size,
-  action ('trash'|'rmdir'), category, reason, cautious}], categories
-  {key: {label, count, size_bytes, cautious}}, skipped[{path, reason}],
-  totals};
-- execute(plan, root, assume_yes=False, confirm=input) -> summary dict
-  {declined, trash_dir, moved, removed_dirs, freed_bytes,
-  freed_by_category, skipped_safety, failed}. Each item runs under its
-  own try/except with a containment re-check right before the move: a
-  failure or a safety skip never aborts the batch. The confirmation
-  answer must be exactly 'YES' (case-sensitive); assume_yes bypasses
-  the prompt (automation and tests only).
+  action ('trash'|'rmdir'), category, reason, cautious, stat}],
+  categories {key: {label, count, size_bytes, cautious}}, skipped
+  [{path, reason}], totals}. 'stat' is the plan-time TOCTOU snapshot
+  {size, mtime_ns, type} from os.stat; execute() re-stats every item
+  right before it acts and aborts the item (skipped as 'changed') when
+  the file changed between planning and execution;
+- execute(plan, root, assume_yes=False, confirm=None) -> summary dict
+  {declined, trash_dir, opid, manifest_path, interrupted_run, moved,
+  removed_dirs, freed_bytes, freed_by_category, skipped_safety,
+  failed}. Each item runs under its own try/except with the containment
+  and NEVER checks re-run right before the move: a failure or a safety
+  skip never aborts the batch. The confirmation answer must be exactly
+  'YES' (case-sensitive); assume_yes bypasses the prompt (automation
+  and tests only);
+- restore(run_dir, root=None, opid=None, assume_yes=False, confirm=
+  input): re-exported from trashops; moves the run's 'moved' entries
+  back (see trashops.restore).
 
 CLI:
     python safe_clean.py <root> [--home H] [--yes] [--include-cautious]
                         [--max-bytes N]
+    python safe_clean.py restore <run_dir> [--root R] [--yes]
 
-Exit codes: 0 done or declined, 1 nothing to clean, 2 bad arguments or
-root, 3 safety refusal (the user-supplied root itself is on the never
-list: a symlink, inside .git, or the trash folder).
+Exit codes: 0 done or declined, 1 nothing to clean (or restore had
+failed items), 2 bad arguments or root, 3 safety refusal (the
+user-supplied root itself is on the never list: a symlink, inside .git,
+or the trash folder).
 """
 import argparse
 import fnmatch
 import os
 import re
-import shutil
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit_scan  # noqa: E402  (scan, BUILD_DIRS, NAME_SECRET_RX)
 import enrich  # noqa: E402  (_nearest_repo, _repo_tracked_files)
+import trashops  # noqa: E402  (shared trash-run machinery)
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 PROG = 'safe_clean'
 
-# where moved junk lands: <root>/<TRASH_DIR_NAME>/<YYYYmmdd-HHMMSS>/<rel>
-TRASH_DIR_NAME = '.workspace-audit-trash'
+# where moved junk lands:
+# <root>/<TRASH_DIR_NAME>/<YYYYmmdd-HHMMSS>-<opid>/<rel> (trashops.py)
+TRASH_DIR_NAME = trashops.TRASH_DIR_NAME
 
 # build artifact names split by risk: the safe set is regenerable by
 # definition; the rest of audit_scan.BUILD_DIRS goes to the cautious set
@@ -221,13 +232,18 @@ def build_plan(rep, include_cautious=False, max_bytes=DEFAULT_MAX_BYTES):
             skipped.append({'path': rel, 'reason': reason})
 
     def add(rel, size, action, category, reason, cautious):
-        if not _exists(root / os.path.normpath(str(rel))):
+        p = root / os.path.normpath(str(rel))
+        if not _exists(p):
+            skip(rel, 'missing')
+            return
+        snap = trashops.snapshot(p)   # plan-time TOCTOU baseline
+        if snap is None:
             skip(rel, 'missing')
             return
         seen.add(rel)
         items.append({'path': rel, 'size': size or 0, 'action': action,
                       'category': category, 'reason': reason,
-                      'cautious': bool(cautious)})
+                      'cautious': bool(cautious), 'stat': snap})
 
     classified = {str(e.get('path', '')): e
                   for e in rep.get('junk_classified') or [] if e.get('path')}
@@ -358,23 +374,33 @@ def build_plan(rep, include_cautious=False, max_bytes=DEFAULT_MAX_BYTES):
 
 # --- execution --------------------------------------------------------------------
 
-def execute(plan, root, assume_yes=False, confirm=input):
+def execute(plan, root, assume_yes=False, confirm=None):
     """Run a plan built by build_plan. Confirmation first (the answer
     must be exactly 'YES'; assume_yes skips the prompt and exists for
     automation and tests only), then every item under its own try/except
-    with the containment and NEVER checks re-run right before it. A
-    failing or refused item is recorded and never aborts the batch.
-    Returns the summary dict described in the module docstring."""
+    with the containment and NEVER checks re-run right before it, plus
+    the TOCTOU re-stat: an item whose size, mtime_ns or type changed
+    since build_plan is aborted as 'changed' and the disk is left alone
+    for it. A failing, refused or changed item never aborts the batch.
+
+    The run lands in <root>/<TRASH_DIR_NAME>/<stamp>-<opid>/ with a
+    write-ahead manifest.json (trashops.TrashRun). Before the run
+    starts, earlier run dirs are scanned for interrupted runs
+    (in-flight manifest entries); their opid is recorded in the new
+    manifest header and they are never touched. Returns the summary
+    dict described in the module docstring."""
     root = Path(root).resolve()
-    summary = {'declined': False, 'trash_dir': None, 'moved': [],
-               'removed_dirs': [], 'freed_bytes': 0, 'freed_by_category': {},
-               'skipped_safety': [], 'failed': []}
+    summary = {'declined': False, 'root': str(root), 'trash_dir': None,
+               'opid': None, 'manifest_path': None, 'interrupted_run': None,
+               'moved': [], 'removed_dirs': [], 'freed_bytes': 0,
+               'freed_by_category': {}, 'skipped_safety': [], 'failed': []}
     items = list((plan or {}).get('items') or [])
     if not items:
         return summary           # an empty plan touches nothing, never prompts
     if not assume_yes:
+        ask = confirm if confirm is not None else input
         try:
-            answer = confirm('Type YES to clean: ')
+            answer = ask('Type YES to clean: ')
         except EOFError:
             answer = ''
         if answer != 'YES':
@@ -382,13 +408,13 @@ def execute(plan, root, assume_yes=False, confirm=input):
             return summary
     max_bytes = min(int(plan.get('max_bytes') or HARD_MAX_BYTES), HARD_MAX_BYTES)
 
-    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    trash_run = root / TRASH_DIR_NAME / stamp
-    n = 2
-    while trash_run.exists():    # same-second collision: pick a fresh name
-        trash_run = root / TRASH_DIR_NAME / ('%s-%d' % (stamp, n))
-        n += 1
-    summary['trash_dir'] = str(trash_run)
+    interrupted = trashops.find_interrupted(root)
+    summary['interrupted_run'] = interrupted
+    run = trashops.TrashRun(root, 'safe_clean', interrupted=interrupted)
+    summary['trash_dir'] = str(run.run_dir)
+    summary['opid'] = run.opid
+    summary['manifest_path'] = str(run.manifest_path)
+    counts = {'moved': 0, 'failed': 0, 'skipped': 0, 'removed_dirs': 0}
 
     for it in items:
         rel = str(it.get('path', ''))
@@ -398,35 +424,51 @@ def execute(plan, root, assume_yes=False, confirm=input):
             why = 'escape'
         if why:
             summary['skipped_safety'].append({'path': rel, 'reason': why})
+            counts['skipped'] += 1
             continue
         target = root / os.path.normpath(rel)
         if not _exists(target):
             summary['skipped_safety'].append({'path': rel, 'reason': 'missing'})
+            counts['skipped'] += 1
+            continue
+        cur = trashops.snapshot(target)   # re-stat right before acting
+        if not trashops.unchanged(it.get('stat'), cur):
+            summary['skipped_safety'].append({'path': rel, 'reason': 'changed'})
+            counts['skipped'] += 1
+            continue
+        if (cur is not None and cur['type'] == 'file' and max_bytes is not None
+                and cur['size'] > max_bytes):
+            # a hand-built plan without a snapshot: a file that grew past
+            # the cap after planning still refuses to move
+            summary['skipped_safety'].append({'path': rel, 'reason': 'oversized'})
+            counts['skipped'] += 1
             continue
         freed = 0
         try:
             if it.get('action') == 'rmdir':
-                os.rmdir(str(target))   # refuses a non-empty dir: intended
+                trashops.record_rmdir(run, target, rel, cur)
                 summary['removed_dirs'].append({'path': rel})
+                counts['removed_dirs'] += 1
             elif it.get('action') == 'trash':
-                dst = trash_run / os.path.normpath(rel)
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if dst.exists():
-                    raise OSError('trash destination already exists: %s' % dst)
-                shutil.move(str(target), str(dst))
+                dst, _idx = trashops.move_to_trash(
+                    run, target, rel, it.get('size') or 0,
+                    (cur or {}).get('mtime_ns'), (cur or {}).get('type'))
                 summary['moved'].append({'path': rel, 'moved_to': str(dst),
                                          'size_bytes': it.get('size') or 0,
                                          'category': it.get('category')})
                 freed = it.get('size') or 0
+                counts['moved'] += 1
             else:
                 raise ValueError('unknown action: %r' % (it.get('action'),))
         except Exception as exc:
             summary['failed'].append(
                 {'path': rel, 'error': '%s: %s' % (type(exc).__name__, exc)})
+            counts['failed'] += 1
             continue
         summary['freed_bytes'] += freed
         cat = it.get('category') or '?'
         summary['freed_by_category'][cat] = summary['freed_by_category'].get(cat, 0) + freed
+    run.finish(planned=len(items), freed_bytes=summary['freed_bytes'], **counts)
     return summary
 
 
@@ -504,10 +546,16 @@ def summary_text(summary):
             lines.append('  %s: %s' % (CATEGORY_LABELS.get(cat, cat), _human(size)))
     if summary.get('removed_dirs'):
         lines.append('Empty folders removed: %d' % len(summary['removed_dirs']))
-    lines.append('Moved %d item(s) to trash: %s'
-                 % (len(summary.get('moved') or []), summary.get('trash_dir')))
-    lines.append('To restore an item, move it from the trash folder back '
-                 'to its original place.')
+    lines.append('Moved %d item(s) to trash.' % len(summary.get('moved') or []))
+    if summary.get('trash_dir'):
+        lines.append('Trash run: %s' % summary['trash_dir'])
+        lines.append('Operation id: %s' % summary.get('opid'))
+        lines.append('Manifest: %s' % summary.get('manifest_path'))
+        lines.append('To undo this run: python %s.py restore "%s" --root "%s"'
+                     % (Path(__file__).stem, summary['trash_dir'],
+                        summary.get('root') or ''))
+    lines.append('Removed empty folders cannot be restored; everything '
+                 'else can (see the command above).')
     lines.append('The trash is never emptied automatically; delete it by '
                  'hand once you are satisfied.')
     if summary.get('skipped_safety'):
@@ -520,6 +568,71 @@ def summary_text(summary):
 
 
 # --- CLI ---------------------------------------------------------------------------
+
+# API re-export: the restore entry point lives in trashops next to the
+# manifest code it depends on; safe_clean re-exports it so callers of
+# the cleaner can find it in one place.
+restore = trashops.restore
+
+
+def _restore_text(summary):
+    """The after-restore summary screen."""
+    if summary.get('declined'):
+        return 'Nothing was changed.'
+    lines = ['Restore finished.',
+             'Restored %d item(s) from: %s'
+             % (len(summary.get('restored') or []), summary.get('run_dir'))]
+    if summary.get('opid'):
+        lines.append('Operation id: %s' % summary['opid'])
+    for r in summary.get('restored') or []:
+        if r.get('restored_to') != r.get('original_path'):
+            lines.append('  %s -> %s (original spot was occupied)'
+                         % (r['original_path'], r['restored_to']))
+    if summary.get('not_restorable'):
+        lines.append('%d item(s) were removed empty folders; those cannot '
+                     'be restored.' % summary['not_restorable'])
+    if summary.get('already_done'):
+        lines.append('%d item(s) were already restored earlier.'
+                     % summary['already_done'])
+    if summary.get('failed'):
+        lines.append('Failed: %d (the rest of the run was not affected)'
+                     % len(summary['failed']))
+    lines.append('Manifest updated: %s' % summary.get('manifest_path'))
+    return '\n'.join(lines)
+
+
+def _restore_main(argv):
+    """`safe_clean.py restore <run_dir> [--root R] [--yes]` -- undo one
+    trash run recorded in its manifest. Exit codes: 0 ok or declined, 1
+    some items failed to restore, 2 bad arguments or unreadable
+    manifest."""
+    ap = argparse.ArgumentParser(
+        prog='safe_clean.py restore',
+        description='Put one trash run back: reads the run manifest and '
+                    'moves every recorded item to its original place '
+                    '(or next to it, suffixed .restored-N, when that place '
+                    'is taken). Nothing is ever overwritten.')
+    ap.add_argument('run_dir',
+                    help='trash run directory printed by the cleanup '
+                         '(contains manifest.json)')
+    ap.add_argument('--root', default=None, metavar='R',
+                    help='workspace root (default: the root recorded in '
+                         'the manifest)')
+    ap.add_argument('--yes', action='store_true',
+                    help='skip the YES confirmation prompt (automation and '
+                         'tests only; every safety check stays on)')
+    a = ap.parse_args(argv)
+    try:
+        summary = trashops.restore(a.run_dir, a.root, assume_yes=a.yes)
+    except (OSError, ValueError) as exc:
+        print('%s: %s' % (PROG, exc), file=sys.stderr)
+        return EXIT_ARGS
+    print(_restore_text(summary))
+    for f in summary.get('failed') or []:
+        print('%s: failed on %s: %s' % (PROG, f.get('original_path'),
+                                        f.get('error')), file=sys.stderr)
+    return EXIT_OK if not summary.get('failed') else EXIT_NOTHING
+
 
 def _root_refusal(root):
     """NEVER-list reason for the user-supplied root itself, or None."""
@@ -536,16 +649,21 @@ def _root_refusal(root):
 
 
 def main(argv=None):
+    args = list(sys.argv[1:]) if argv is None else list(argv)
+    if args and args[0] == 'restore':   # subcommand, keeps <root> positional
+        return _restore_main(args[1:])
+
     ap = argparse.ArgumentParser(
         prog='safe_clean.py',
         description='Guided, near-zero-risk cleanup for an agent workspace: '
                     'scan, show a plain-language plan, ask for the word YES, '
                     'then move junk into a trash folder inside the workspace. '
                     'Nothing is deleted outright.',
-        epilog='Everything movable lands in %s/<timestamp>/ inside the '
-               'workspace and can be restored by moving it back. Exit codes: '
-               '0 done or declined, 1 nothing to clean, 2 bad arguments or '
-               'root, 3 safety refusal.' % TRASH_DIR_NAME)
+        epilog='Everything movable lands in %s/<timestamp>-<opid>/ inside '
+               'the workspace, recorded in a manifest.json you can undo '
+               'with: safe_clean.py restore <run_dir>. Exit codes: 0 done '
+               'or declined, 1 nothing to clean, 2 bad arguments or root, '
+               '3 safety refusal.' % TRASH_DIR_NAME)
     ap.add_argument('root', help='workspace root to clean')
     ap.add_argument('--home', default=str(Path.home()),
                     help='home directory for the scan (default: this user home)')
@@ -560,7 +678,7 @@ def main(argv=None):
                     metavar='N',
                     help='skip single items larger than N bytes (default and '
                          'hard ceiling: %d)' % DEFAULT_MAX_BYTES)
-    a = ap.parse_args(argv)
+    a = ap.parse_args(args)
 
     raw = Path(a.root)
     try:

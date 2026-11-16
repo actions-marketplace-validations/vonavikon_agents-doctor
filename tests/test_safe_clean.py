@@ -188,7 +188,7 @@ class ExecuteYes(SafeCleanCase):
         trash = Path(summary['trash_dir'])
         self.assertTrue(trash.is_dir())
         self.assertEqual(trash.parent.name, TRASH)
-        self.assertRegex(trash.name, r'^\d{8}-\d{6}(-\d+)?$')
+        self.assertRegex(trash.name, r'^\d{8}-\d{6}-[0-9a-f]{8}$')
 
         # trash preserves relative paths; originals are gone
         for rel in ('node_modules', 'screenshot_1.png', 'temp_notes.txt'):
@@ -386,6 +386,591 @@ class ResearchGuards(SafeCleanCase):
         item = next(i for i in cautious['items'] if i['path'] == 'node_modules')
         self.assertEqual(item['category'], safe_clean.CAT_BUILD_CAUTIOUS)
         self.assertTrue(item['cautious'])
+
+
+# --- stage 4: trash runs, manifest, TOCTOU, crash recovery -------------------------
+
+import json  # noqa: E402  (manifest checks)
+
+import trashops  # noqa: E402
+from unittest import mock  # noqa: E402
+
+
+def crafted_plan(ws, *items, max_bytes=None):
+    """A minimal hand-built plan (no scan): items are (path, action)
+    pairs. Such plans carry no TOCTOU snapshot, like plans built before
+    stage 4; execute() must still handle them safely."""
+    return {'root': str(ws),
+            'max_bytes': (max_bytes if max_bytes is not None
+                          else safe_clean.DEFAULT_MAX_BYTES),
+            'items': [{'path': p, 'size': (ws / p).stat().st_size
+                       if (ws / p).is_file() else 0,
+                       'action': a, 'category': safe_clean.CAT_CONFIRMED,
+                       'reason': 'crafted', 'cautious': False}
+                      for p, a in items],
+            'categories': {}, 'skipped': [], 'totals': {}}
+
+
+class RunDirAndManifest(SafeCleanCase):
+    def test_run_dir_has_opid_and_manifest_records_every_item(self):
+        plan = safe_clean.build_plan(self.rep)
+        summary = safe_clean.execute(plan, self.ws,
+                                     confirm=lambda prompt: 'YES')
+
+        self.assertRegex(summary['opid'], r'^[0-9a-f]{8}$')
+        run_dir = Path(summary['trash_dir'])
+        self.assertEqual(run_dir.name.split('-')[-1], summary['opid'])
+        self.assertEqual(run_dir.parent, Path(summary['root']) / TRASH)
+
+        data = json.loads((run_dir / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(data['opid'], summary['opid'])
+        self.assertEqual(data['tool'], 'safe_clean')
+        self.assertEqual(data['root'], summary['root'])
+        self.assertIn('started_at', data)
+        self.assertIsNone(data['interrupted_run'])
+        self.assertEqual(data['totals']['planned'], len(plan['items']))
+        self.assertEqual(data['totals']['moved'], len(summary['moved']))
+        self.assertEqual(data['totals']['removed_dirs'],
+                         len(summary['removed_dirs']))
+
+        moved = {e['original_path']: e for e in data['entries']
+                 if e['action'] == 'trash'}
+        self.assertEqual(set(moved), {m['path'] for m in summary['moved']})
+        entry = moved['screenshot_1.png']
+        self.assertEqual(entry['status'], 'moved')
+        self.assertEqual(entry['trash_path'], 'screenshot_1.png')
+        self.assertIn('mtime_ns', entry)
+        self.assertIn('moved_at', entry)
+        self.assertTrue(entry['restorable'])
+
+        rmdirs = [e for e in data['entries'] if e['action'] == 'rmdir']
+        self.assertEqual({e['original_path'] for e in rmdirs},
+                         {d['path'] for d in summary['removed_dirs']})
+        for e in rmdirs:
+            self.assertEqual(e['status'], 'removed')
+            self.assertFalse(e['restorable'])
+
+    def test_summary_text_prints_run_dir_opid_manifest_and_restore_cmd(self):
+        plan = safe_clean.build_plan(self.rep)
+        summary = safe_clean.execute(plan, self.ws,
+                                     confirm=lambda prompt: 'YES')
+        text = safe_clean.summary_text(summary)
+        self.assertIn(summary['trash_dir'], text)
+        self.assertIn(summary['opid'], text)
+        self.assertIn(summary['manifest_path'], text)
+        self.assertIn('safe_clean.py restore "%s"' % summary['trash_dir'], text)
+
+    def test_rerun_creates_a_new_run_dir(self):
+        plan = safe_clean.build_plan(self.rep)
+        s1 = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        # second pass needs a fresh scan: the first one emptied the ws
+        rep2 = audit_scan.scan(self.ws, self.home)
+        plan2 = safe_clean.build_plan(rep2)
+        s2 = safe_clean.execute(plan2, self.ws, confirm=lambda p: 'YES')
+        self.assertNotEqual(s1['trash_dir'], s2['trash_dir'])
+        self.assertNotEqual(s1['opid'], s2['opid'])
+        self.assertTrue(Path(s1['trash_dir']).is_dir())   # old run kept
+
+
+class ToctouSnapshot(SafeCleanCase):
+    def test_file_changed_after_planning_is_aborted(self):
+        plan = safe_clean.build_plan(self.rep)
+        victim = self.ws / 'screenshot_1.png'
+        victim.write_bytes(victim.read_bytes() + b'changed after planning')
+
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+
+        changed = [s for s in summary['skipped_safety']
+                   if s['path'] == 'screenshot_1.png']
+        self.assertEqual(changed, [{'path': 'screenshot_1.png',
+                                    'reason': 'changed'}])
+        # disk untouched for it: still in place with the new content,
+        # and not a single copy of it anywhere in the trash
+        self.assertTrue(victim.is_file())
+        self.assertIn(b'changed after planning', victim.read_bytes())
+        self.assertEqual(list((self.ws / TRASH).rglob('screenshot_1.png')), [])
+        # the rest of the batch was not affected
+        self.assertIn('temp_notes.txt',
+                      {m['path'] for m in summary['moved']})
+
+    def test_mtime_only_change_aborts_too(self):
+        plan = safe_clean.build_plan(self.rep)
+        victim = self.ws / 'temp_notes.txt'
+        os.utime(str(victim), (time.time() + 5, time.time() + 5))
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        reasons = {s['path']: s['reason'] for s in summary['skipped_safety']}
+        self.assertEqual(reasons.get('temp_notes.txt'), 'changed')
+        self.assertTrue(victim.is_file())
+
+    def test_empty_dir_that_gained_a_file_is_aborted(self):
+        plan = safe_clean.build_plan(self.rep)
+        (self.ws / 'empty1' / 'appeared.txt').write_bytes(b'new tenant')
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        reasons = {s['path']: s['reason'] for s in summary['skipped_safety']}
+        self.assertEqual(reasons.get('empty1'), 'changed')
+        self.assertTrue((self.ws / 'empty1' / 'appeared.txt').is_file())
+
+
+class DestinationCollision(SafeCleanCase):
+    def test_taken_destination_gets_suffix_and_both_files_exist(self):
+        # pin the run dir name so the collision can be pre-created
+        with mock.patch.object(trashops, 'new_opid', return_value='deadbeef'), \
+                mock.patch.object(trashops, 'run_stamp',
+                                  return_value='20260101-000000'):
+            run_dir = self.ws / TRASH / '20260101-000000-deadbeef'
+            run_dir.mkdir(parents=True)
+            squatter = run_dir / 'screenshot_1.png'
+            squatter.write_bytes(b'older run occupant')
+
+            plan = crafted_plan(self.ws, ('screenshot_1.png', 'trash'))
+            summary = safe_clean.execute(plan, self.ws,
+                                         confirm=lambda p: 'YES')
+
+        self.assertEqual(summary['trash_dir'], str(run_dir))
+        moved = summary['moved'][0]
+        self.assertTrue(moved['moved_to'].endswith('screenshot_1.png.__1__'))
+        self.assertEqual(squatter.read_bytes(), b'older run occupant')
+        suffixed = run_dir / 'screenshot_1.png.__1__'
+        self.assertEqual(suffixed.read_bytes().startswith(b'png'), True)
+        self.assertFalse((self.ws / 'screenshot_1.png').exists())
+        data = json.loads((run_dir / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(data['entries'][0]['trash_path'],
+                         'screenshot_1.png.__1__')
+
+
+class WriteAheadManifest(SafeCleanCase):
+    def test_failed_move_shows_moving_then_failed_in_manifest(self):
+        statuses_seen_during_move = []
+        real_move = shutil.move
+
+        def move_spy(src, dst):
+            if dst.endswith('temp_notes.txt') or dst.endswith('temp_notes.txt.__1__'):
+                run_dir = Path(dst).parent
+                data = json.loads((run_dir / 'manifest.json')
+                                  .read_text(encoding='utf-8'))
+                statuses_seen_during_move.append(
+                    [e['original_path'] + ':' + e['status']
+                     for e in data['entries']])
+                raise OSError('simulated crash mid-move')
+            return real_move(src, dst)
+
+        plan = crafted_plan(self.ws, ('screenshot_1.png', 'trash'),
+                            ('temp_notes.txt', 'trash'))
+        with mock.patch('shutil.move', side_effect=move_spy):
+            summary = safe_clean.execute(plan, self.ws,
+                                         confirm=lambda p: 'YES')
+
+        # batch continued: item 1 moved, item 2 failed
+        self.assertEqual([m['path'] for m in summary['moved']],
+                         ['screenshot_1.png'])
+        self.assertEqual([f['path'] for f in summary['failed']],
+                         ['temp_notes.txt'])
+        self.assertTrue((self.ws / 'temp_notes.txt').is_file())
+
+        # write-ahead: at the moment the move was attempted, the entry
+        # for temp_notes.txt was already on disk as 'moving'
+        self.assertEqual(statuses_seen_during_move,
+                         [['screenshot_1.png:moved',
+                           'temp_notes.txt:moving']])
+
+        data = json.loads((Path(summary['trash_dir']) / 'manifest.json')
+                          .read_text(encoding='utf-8'))
+        by_path = {e['original_path']: e for e in data['entries']}
+        self.assertEqual(by_path['screenshot_1.png']['status'], 'moved')
+        self.assertEqual(by_path['temp_notes.txt']['status'], 'failed')
+        self.assertIn('simulated crash', by_path['temp_notes.txt']['error'])
+        self.assertEqual(data['totals']['failed'], 1)
+        self.assertEqual(data['totals']['moved'], 1)
+
+
+class CrashRecovery(SafeCleanCase):
+    def _fabricate_interrupted_run(self):
+        run_dir = self.ws / TRASH / '20250101-000000-aaaabbbb'
+        run_dir.mkdir(parents=True)
+        (run_dir / 'mid-flight.bin').write_bytes(b'in flight when it died')
+        (run_dir / 'manifest.json').write_text(json.dumps({
+            'opid': 'aaaabbbb', 'root': str(self.ws), 'tool': 'safe_clean',
+            'started_at': '2025-01-01T00:00:00', 'interrupted_run': None,
+            'totals': {}, 'entries': [
+                {'opid': 'aaaabbbb', 'action': 'trash',
+                 'original_path': 'mid-flight.bin',
+                 'trash_path': 'mid-flight.bin', 'size': 22,
+                 'mtime_ns': 1, 'moved_at': '2025-01-01T00:00:00',
+                 'status': 'moving', 'restorable': True},
+            ]}), encoding='utf-8')
+        return run_dir
+
+    def test_interrupted_run_noted_and_never_touched(self):
+        old_run = self._fabricate_interrupted_run()
+        plan = safe_clean.build_plan(self.rep)
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+
+        self.assertEqual(summary['interrupted_run'], 'aaaabbbb')
+        data = json.loads((Path(summary['trash_dir']) / 'manifest.json')
+                          .read_text(encoding='utf-8'))
+        self.assertEqual(data['interrupted_run'], 'aaaabbbb')
+        # the interrupted run is intact: same files, same manifest
+        self.assertTrue((old_run / 'mid-flight.bin').is_file())
+        old = json.loads((old_run / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(old['entries'][0]['status'], 'moving')
+        self.assertNotEqual(summary['trash_dir'], str(old_run))
+
+    def test_clean_earlier_run_is_not_flagged(self):
+        # an earlier completed run (no in-flight entries) is not interrupted
+        run_dir = self.ws / TRASH / '20250101-000000-cccccccc'
+        run_dir.mkdir(parents=True)
+        (run_dir / 'done.bin').write_bytes(b'x')
+        (run_dir / 'manifest.json').write_text(json.dumps({
+            'opid': 'cccccccc', 'root': str(self.ws), 'tool': 'safe_clean',
+            'entries': [{'opid': 'cccccccc', 'action': 'trash',
+                         'original_path': 'done.bin', 'trash_path': 'done.bin',
+                         'status': 'moved'}]}), encoding='utf-8')
+        plan = safe_clean.build_plan(self.rep)
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        self.assertIsNone(summary['interrupted_run'])
+
+
+class LostAccess(unittest.TestCase):
+    """POSIX-only: permission failures on one item never stop the batch."""
+
+    def setUp(self):
+        if os.name == 'nt':
+            self.skipTest('chmod is not enforced for directories on Windows')
+        self.base = Path(tempfile.mkdtemp())
+        self.ws = self.base / 'ws'
+        (self.ws / 'locked').mkdir(parents=True)
+        (self.ws / 'locked' / 'secret-ish.bin').write_bytes(b'no access')
+        (self.ws / 'fine.txt').write_bytes(b'fine')
+        self.addCleanup(lambda: force_rmtree(self.base))
+        self.addCleanup(self._unlock)   # LIFO: unlock runs before rmtree
+
+    def _unlock(self):
+        locked = self.base / 'ws' / 'locked'
+        if locked.exists():
+            os.chmod(str(locked), 0o700)
+
+    def test_lost_access_item_skipped_batch_continues(self):
+        os.chmod(str(self.ws / 'locked'), 0o000)
+        plan = crafted_plan(self.ws, ('locked/secret-ish.bin', 'trash'),
+                            ('fine.txt', 'trash'))
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+
+        # the inaccessible item was refused (skipped or failed, never
+        # moved) and the batch continued past it
+        refused = ([s for s in summary['skipped_safety']
+                    if s['path'] == 'locked/secret-ish.bin']
+                   + [f for f in summary['failed']
+                      if f['path'] == 'locked/secret-ish.bin'])
+        self.assertEqual(len(refused), 1)
+        self.assertEqual([m['path'] for m in summary['moved']], ['fine.txt'])
+        self.assertTrue((self.ws / 'locked' / 'secret-ish.bin').is_file())
+        self.assertEqual((self.ws / 'locked' / 'secret-ish.bin').read_bytes(),
+                         b'no access')
+
+    def test_read_only_parent_first_item_fails_second_still_moves(self):
+        os.chmod(str(self.ws / 'locked'), 0o500)   # r-x: visible, not writable
+        plan = crafted_plan(self.ws, ('locked/secret-ish.bin', 'trash'),
+                            ('fine.txt', 'trash'))
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+
+        self.assertEqual([f['path'] for f in summary['failed']],
+                         ['locked/secret-ish.bin'])
+        self.assertIn('PermissionError', summary['failed'][0]['error'])
+        self.assertEqual([m['path'] for m in summary['moved']], ['fine.txt'])
+
+        data = json.loads((Path(summary['trash_dir']) / 'manifest.json')
+                          .read_text(encoding='utf-8'))
+        by_path = {e['original_path']: e for e in data['entries']}
+        self.assertEqual(by_path['locked/secret-ish.bin']['status'], 'failed')
+        self.assertEqual(by_path['fine.txt']['status'], 'moved')
+
+
+class NeverReasonUnit(SafeCleanCase):
+    """Direct unit coverage of the one-word NEVER reasons (spec: the
+    hard rules are enforced in code, so each gets a direct probe)."""
+
+    def test_reasons(self):
+        nr = safe_clean._never_reason
+        abs_rel = os.path.join(os.sep, 'elsewhere') if os.name != 'nt' \
+            else os.path.join('C:' + os.sep, 'elsewhere')
+        self.assertEqual(nr(self.ws, abs_rel, 1, None), 'escape')
+        self.assertEqual(nr(self.ws, os.path.join(os.pardir, 'x'), 1, None),
+                         'escape')
+        self.assertEqual(nr(self.ws, str(Path('repo') / '.git' / 'x'),
+                            1, None), 'gitdir')
+        self.assertEqual(nr(self.ws, str(Path(TRASH) / 'x'), 1, None),
+                         'trash')
+        self.assertEqual(nr(self.ws, '.env', 1, None), 'secret')
+        self.assertEqual(nr(self.ws, 'settings.local.json', 1, None),
+                         'secret')
+        self.assertEqual(nr(self.ws, 'fine.bin', 1, None, tracked=True),
+                         'tracked')
+        self.assertEqual(nr(self.ws, 'fine.bin', 10, 4), 'oversized')
+        self.assertIsNone(nr(self.ws, 'fine.bin', 4, 10, tracked=False))
+
+    def test_symlink_reason(self):
+        if not hasattr(os, 'symlink'):
+            self.skipTest('os.symlink unavailable')
+        try:
+            os.symlink(str(self.base), str(self.ws / 'link'))
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable on this system')
+        self.assertEqual(safe_clean._never_reason(self.ws, 'link', 1, None),
+                         'symlink')
+
+
+class TrackedStatusInRepo(SafeCleanCase):
+    """Duplicates inside a git repo exercise the cached git-ls-files
+    tracked-status helper (the cautious duplicates tier)."""
+
+    def test_duplicates_in_repo_split_by_tracked_status(self):
+        blob = b'in-repo duplicate payload\n' * 64   # >= DUP_MIN_BYTES
+        for name, days in ((Path('repo') / 'dup1.bin', 200),
+                           (Path('repo') / 'dup2.bin', 100),
+                           (Path('repo') / 'dup3.bin', 0)):
+            f = self.ws / name
+            f.write_bytes(blob)
+            t = time.time() - days * 86400 if days else None
+            os.utime(str(f), (t, t) if t else None)
+        git(self.repo, 'add', 'dup2.bin')   # middle copy is tracked
+        git(self.repo, 'commit', '-q', '-m', 'dup2')
+
+        rep = audit_scan.scan(self.ws, self.home)
+        plan = safe_clean.build_plan(rep, include_cautious=True)
+        olds = {i['path'] for i in plan['items']
+                if i['category'] == safe_clean.CAT_OLD_COPIES}
+        in_repo = {p for p in olds if p.startswith('repo')}
+        # dup1 (untracked, oldest) planned; dup2 skipped as tracked
+        self.assertEqual(in_repo, {str(Path('repo') / 'dup1.bin')})
+        reasons = {s['path']: s['reason'] for s in plan['skipped']}
+        self.assertEqual(reasons.get(str(Path('repo') / 'dup2.bin')),
+                         'tracked')
+
+        # git failing entirely -> the duplicate is 'unsure', not planned
+        with mock.patch.object(safe_clean.enrich, '_repo_tracked_files',
+                               return_value=None):
+            plan2 = safe_clean.build_plan(rep, include_cautious=True)
+        reasons2 = {s['path']: s['reason'] for s in plan2['skipped']}
+        self.assertEqual(reasons2.get(str(Path('repo') / 'dup1.bin')),
+                         'unsure')
+
+
+class PlanBranches(SafeCleanCase):
+    """Hand-crafted scan reports hit the planner's guard branches."""
+
+    def craft_rep(self, **kw):
+        rep = {'root': str(self.ws)}
+        rep.update(kw)
+        return rep
+
+    def test_junk_dir_branches(self):
+        # a .git path is refused even for a safe build name; a missing
+        # cautious name stays hidden without the flag; an in-repo
+        # cautious dir with no classified tracked signal -> 'unsure'
+        gitdir_rel = str(Path('repo') / '.git' / 'objects')
+        old = time.time() - 120 * 86400
+        os.utime(str(self.ws / gitdir_rel), (old, old))
+        rep = self.craft_rep(junk={'dirs': [
+            {'path': gitdir_rel, 'size_bytes': 10,
+             'reason': 'build artifact (__pycache__)'},
+            {'path': 'dist', 'size_bytes': 10,
+             'reason': 'build artifact (dist)'},
+            {'path': 'ghost', 'size_bytes': 10,
+             'reason': 'build artifact (__pycache__)'},
+        ]})
+        plan = safe_clean.build_plan(rep)
+        paths = self.paths(plan)
+        self.assertNotIn(gitdir_rel, paths)
+        self.assertNotIn('dist', paths)
+        self.assertNotIn('ghost', paths)
+        reasons = {s['path']: s['reason'] for s in plan['skipped']}
+        self.assertEqual(reasons.get(gitdir_rel), 'gitdir')
+        self.assertEqual(reasons.get('ghost'), 'unsure')  # no tracked signal
+
+        in_repo_dist = self.ws / 'repo' / 'dist'
+        in_repo_dist.mkdir()
+        os.utime(str(in_repo_dist), (old, old))
+        plan2 = safe_clean.build_plan(
+            self.craft_rep(junk={'dirs': [
+                {'path': str(Path('repo') / 'dist'), 'size_bytes': 10,
+                 'reason': 'build artifact (dist)'}]}),
+            include_cautious=True)
+        reasons2 = {s['path']: s['reason'] for s in plan2['skipped']}
+        self.assertEqual(reasons2.get(str(Path('repo') / 'dist')), 'unsure')
+
+    def test_classified_secret_name_refused(self):
+        rep = self.craft_rep(junk_classified=[{
+            'path': 'pkg/settings.local.json', 'cls': 'confirmed_unused',
+            'size_bytes': 10, 'reason': 'unused',
+            'signals': {'tracked': False}}])
+        plan = safe_clean.build_plan(rep)
+        self.assertEqual(plan['items'], [])
+        self.assertEqual(self.skipped_for(
+            plan, 'settings.local.json')[0]['reason'], 'secret')
+
+    def test_duplicate_group_degenerate_branches(self):
+        rep = self.craft_rep(
+            junk={'dirs': [{'path': 'node_modules', 'size_bytes': 1,
+                            'reason': 'build artifact (node_modules)'}]},
+            junk_classified=[{'path': 'node_modules',
+                              'cls': 'confirmed_unused',
+                              'signals': {'tracked': False},
+                              'size_bytes': 1, 'reason': 'x'}],
+            duplicates=[
+                # node_modules already planned (seen), ghost missing:
+                # nothing added from this group
+                {'files': ['node_modules', 'ghost.bin'], 'size_bytes': 5},
+                # a group over the cap -> the old copy is 'oversized'
+                {'files': ['data_a.bin', 'data_b.bin'],
+                 'size_bytes': 10 ** 12},
+            ])
+        plan = safe_clean.build_plan(rep, include_cautious=True)
+        olds = [i['path'] for i in plan['items']
+                if i['category'] == safe_clean.CAT_OLD_COPIES
+                and i['path'].startswith('data_')]
+        self.assertEqual(olds, [])
+        reasons = {s['path']: s['reason'] for s in plan['skipped']}
+        self.assertEqual(reasons.get('ghost.bin'), 'missing')
+        self.assertEqual(reasons.get('data_a.bin'), 'oversized')
+
+
+class ExecuteEdgeCases(SafeCleanCase):
+    def test_item_removed_after_planning_skipped_missing(self):
+        plan = safe_clean.build_plan(self.rep)
+        (self.ws / 'temp_notes.txt').unlink()
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        reasons = {s['path']: s['reason'] for s in summary['skipped_safety']}
+        self.assertEqual(reasons.get('temp_notes.txt'), 'missing')
+        self.assertIn('screenshot_1.png',
+                      {m['path'] for m in summary['moved']})
+
+    def test_unknown_action_fails_the_item_only(self):
+        plan = crafted_plan(self.ws, ('screenshot_1.png', 'shred'))
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        self.assertEqual(len(summary['failed']), 1)
+        self.assertIn('unknown action', summary['failed'][0]['error'])
+        self.assertTrue((self.ws / 'screenshot_1.png').is_file())
+
+    def test_snapshotless_plan_size_recheck(self):
+        # a hand-built plan declares a tiny size; the file is actually
+        # over the plan's cap -> refused at execute time by the re-stat
+        big = self.ws / 'grew.bin'
+        big.write_bytes(b'x' * 100)
+        plan = crafted_plan(self.ws, ('grew.bin', 'trash'), max_bytes=10)
+        plan['items'][0]['size'] = 5    # the declared size stays under
+        summary = safe_clean.execute(plan, self.ws, confirm=lambda p: 'YES')
+        self.assertEqual(summary['skipped_safety'],
+                         [{'path': 'grew.bin', 'reason': 'oversized'}])
+        self.assertTrue(big.is_file())
+
+
+class TextShapes(SafeCleanCase):
+    """The plain-language screens and helpers."""
+
+    def test_human_sizes(self):
+        self.assertEqual(safe_clean._human(0), '0 B')
+        self.assertEqual(safe_clean._human(2048), '2.0 KB')
+        self.assertIn('TB', safe_clean._human(3 * 1024 ** 4))
+
+    def test_preview_shows_cautious_section_only_with_flag(self):
+        text = safe_clean.preview_text(
+            safe_clean.build_plan(self.rep, include_cautious=True))
+        self.assertIn('Optional extras', text)
+        # a cautious-only plan: the safe section says '(nothing)'
+        crafted = {'root': str(self.ws),
+                   'max_bytes': safe_clean.DEFAULT_MAX_BYTES,
+                   'items': [], 'skipped': [],
+                   'categories': {safe_clean.CAT_BUILD_CAUTIOUS: {
+                       'label': 'local state', 'count': 1,
+                       'size_bytes': 5, 'cautious': True}}}
+        self.assertIn('(nothing)', safe_clean.preview_text(crafted))
+
+    def test_summary_text_declined_and_problem_lines(self):
+        self.assertEqual(safe_clean.summary_text({'declined': True}),
+                         'Nothing was changed.')
+        text = safe_clean.summary_text({
+            'declined': False, 'freed_bytes': 10,
+            'freed_by_category': {}, 'removed_dirs': [],
+            'moved': [], 'trash_dir': 'x', 'opid': 'ab12cd34',
+            'manifest_path': 'x/manifest.json', 'root': 'r',
+            'skipped_safety': [{'path': 'a', 'reason': 'escape'}],
+            'failed': [{'path': 'b', 'error': 'e'}]})
+        self.assertIn('Skipped as unsafe: 1', text)
+        self.assertIn('Failed: 1', text)
+        self.assertIn('Operation id: ab12cd34', text)
+
+    def test_restore_text_branches(self):
+        declined = safe_clean._restore_text({'declined': True})
+        self.assertEqual(declined, 'Nothing was changed.')
+        text = safe_clean._restore_text({
+            'declined': False, 'run_dir': 'rd', 'opid': 'ab12cd34',
+            'manifest_path': 'rd/manifest.json',
+            'restored': [{'original_path': 'a.txt',
+                          'restored_to': 'a.txt.restored-1'}],
+            'not_restorable': 2, 'already_done': 1,
+            'failed': [{'original_path': 'c', 'error': 'x'}]})
+        self.assertIn('a.txt -> a.txt.restored-1', text)
+        self.assertIn('(original spot was occupied)', text)
+        self.assertIn('2 item(s) were removed empty folders', text)
+        self.assertIn('1 item(s) were already restored', text)
+        self.assertIn('Failed: 1', text)
+
+
+class CliExtras(SafeCleanCase):
+    def run_main(self, *args):
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = safe_clean.main([str(a) for a in args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_trash_root_refused_with_three(self):
+        (self.ws / TRASH).mkdir()
+        rc, _, err = self.run_main(self.ws / TRASH, '--home', self.home)
+        self.assertEqual(rc, 3)
+        self.assertIn('trash folder', err)
+
+    def test_interactive_decline_in_process(self):
+        with mock.patch('builtins.input', return_value='no'):
+            rc, out, _ = self.run_main(self.ws, '--home', self.home)
+        self.assertEqual(rc, 0)
+        self.assertIn('Nothing was changed.', out)
+        self.assertTrue((self.ws / 'node_modules').is_dir())
+
+    def test_eof_on_prompt_declines(self):
+        with mock.patch('builtins.input', side_effect=EOFError):
+            rc, out, _ = self.run_main(self.ws, '--home', self.home)
+        self.assertEqual(rc, 0)
+        self.assertIn('Nothing was changed.', out)
+
+    def test_failed_item_reported_on_stderr(self):
+        real_move = shutil.move
+        calls = []
+
+        def move_spy(src, dst):
+            calls.append(Path(src).name)
+            if Path(src).name == 'screenshot_1.png':
+                raise OSError('boom during move')
+            return real_move(src, dst)
+
+        with mock.patch('shutil.move', side_effect=move_spy):
+            rc, out, err = self.run_main(self.ws, '--home', self.home, '--yes')
+        self.assertEqual(rc, 0)
+        self.assertIn('failed on screenshot_1.png', err)
+        self.assertTrue((self.ws / 'screenshot_1.png').is_file())
+        self.assertIn('Failed: 1', out)
+
+    def test_nothing_to_clean_mentions_kept_out(self):
+        quiet = self.base / 'quiet'
+        quiet.mkdir()
+        big = quiet / 'old-huge.bin'
+        with big.open('wb') as fh:
+            fh.write(b'x')
+        os.truncate(str(big), BIG_BYTES)
+        os.utime(str(big), (OLD, OLD))
+        rc, out, _ = self.run_main(quiet, '--home', self.home, '--yes')
+        self.assertEqual(rc, 1)
+        self.assertIn('Nothing safe to clean', out)
+        self.assertIn('Kept out of the plan', out)
 
 
 if __name__ == '__main__':

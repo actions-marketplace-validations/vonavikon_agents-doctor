@@ -517,8 +517,11 @@ def chain_budget(root):
     return out
 
 
-def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
+def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
+         profile=None):
+    prof = {} if profile is None else profile
     t0 = time.monotonic()
+    _tp = t0
     rep = {'schema_version': '1.0', 'root': str(root), 'home': str(home),
            'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
            'top_level': [], 'dup_checkouts': {}, 'context_files': [], 'context_drift': [],
@@ -527,82 +530,183 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
            'findings': [], 'rules_version': RULES_VERSION,
            'junk': {'files': [], 'dirs': [], 'empty_dirs': []},
            'duplicates': [], 'large_files': [], 'secrets': [], 'gates': [], 'stats': {}}
-    per_top, total_files, hashes = {}, 0, {}
+    per_top, total_files = {}, 0
     seen_secret_lines = set()
     skipped_links = 0
+    # deferred, read-once work: sizes come from DirEntry stats (cached on
+    # Windows), file CONTENT is read at most once per file, and only for
+    # the few files that need it (duplicate-size groups, secret candidates)
+    size_groups = {}     # size -> [rel paths] (dedup candidates only)
+    secret_candidates = []  # (rel, fn) files whose content may hide secrets
 
     def inside_root(target):
         return target == root or root in target.parents
 
-    for dirpath, dirnames, filenames in os.walk(root):
-        keep = []
-        for dn in dirnames:
-            full = Path(dirpath) / dn
-            if dn == '.git':
-                continue
-            if full.is_symlink():
-                # never descend into or measure a symlinked directory:
-                # it may point outside the workspace
-                skipped_links += 1
-                continue
-            reason = f'build artifact ({dn})' if dn in BUILD_DIRS else dir_junk_reason(dn)
-            if reason:
-                size, count = subtree(full)
-                rel = str(full.relative_to(root))
-                top = rel.split(os.sep)[0]
-                rep['junk']['dirs'].append({'path': rel, 'reason': reason,
-                                            'size_bytes': size, 'files': count})
-                per_top[top] = per_top.get(top, 0) + size
-                total_files += count
-                continue
-            keep.append(dn)
-        dirnames[:] = keep
-
-        if Path(dirpath) != root and not dirnames and not filenames:
-            rep['junk']['empty_dirs'].append(str(Path(dirpath).relative_to(root)))
-
-        for fn in filenames:
-            f = Path(dirpath) / fn
-            if f.is_symlink():
-                # boundary guard: a file symlink may point outside the root
-                try:
-                    if not inside_root(f.resolve()):
+    # single scandir-based walk: DirEntry.stat(follow_symlinks=False) is
+    # cached metadata on Windows, so the traversal costs one scandir per
+    # directory and zero per-file path stats
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        subdirs = []
+        has_children = False
+        for ent in entries:
+            try:
+                if ent.is_symlink():
+                    if ent.is_dir():
                         skipped_links += 1
                         continue
-                except OSError:
-                    skipped_links += 1
-                    continue
-            try:
-                st = f.stat()
-            except OSError:
-                continue
-            rel = str(f.relative_to(root))
-            top = rel.split(os.sep)[0]
-            per_top[top] = per_top.get(top, 0) + st.st_size
-            total_files += 1
-
-            why = file_junk_reason(fn)
-            if why:
-                rep['junk']['files'].append({'path': rel, 'reason': why,
-                                             'size_bytes': st.st_size})
-            if st.st_size >= BIG_FILE_BYTES:
-                rep['large_files'].append({'path': rel, 'size_bytes': st.st_size})
-            if DUP_MIN_BYTES <= st.st_size <= DUP_MAX_BYTES:
-                h = hashlib.md5(f.read_bytes()).hexdigest()
-                hashes.setdefault(h, []).append(rel)
-            if (fn in SECRET_FILENAMES or NAME_SECRET_RX.search(fn)
-                    or f.suffix.lower() in TEXT_EXTS) and st.st_size < 1024 * 1024:
-                text = f.read_text(encoding='utf-8', errors='replace')
-                for hit in secscan.scan_text(rel, text):
-                    if (rel, hit['line']) in seen_secret_lines:
+                    try:
+                        if not inside_root(Path(ent.path).resolve()):
+                            skipped_links += 1
+                            continue
+                    except OSError:
+                        skipped_links += 1
                         continue
-                    seen_secret_lines.add((rel, hit['line']))
-                    rep['secrets'].append({'path': rel, 'line': hit['line'],
-                                           'kind': hit['kind'],
-                                           'mask': hit['mask'],
-                                           'fingerprint': hit['fingerprint'],
-                                           'confidence': hit['confidence']})
+                if ent.is_dir(follow_symlinks=False):
+                    has_children = True
+                    dn = ent.name
+                    if dn == '.git':
+                        continue
+                    reason = (f'build artifact ({dn})' if dn in BUILD_DIRS
+                              else dir_junk_reason(dn))
+                    if reason:
+                        size, count = subtree(Path(ent.path))
+                        rel = str(Path(ent.path).relative_to(root))
+                        top = rel.split(os.sep)[0]
+                        rep['junk']['dirs'].append(
+                            {'path': rel, 'reason': reason,
+                             'size_bytes': size, 'files': count})
+                        per_top[top] = per_top.get(top, 0) + size
+                        total_files += count
+                        continue
+                    subdirs.append(ent.path)
+                elif ent.is_file(follow_symlinks=False):
+                    has_children = True
+                    try:
+                        st = ent.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    fn = ent.name
+                    rel = str(Path(ent.path).relative_to(root))
+                    top = rel.split(os.sep)[0]
+                    per_top[top] = per_top.get(top, 0) + st.st_size
+                    total_files += 1
 
+                    why = file_junk_reason(fn)
+                    if why:
+                        rep['junk']['files'].append(
+                            {'path': rel, 'reason': why,
+                             'size_bytes': st.st_size})
+                    if st.st_size >= BIG_FILE_BYTES:
+                        rep['large_files'].append(
+                            {'path': rel, 'size_bytes': st.st_size})
+                    if DUP_MIN_BYTES <= st.st_size <= DUP_MAX_BYTES:
+                        size_groups.setdefault(st.st_size, []).append(rel)
+                    if (fn in SECRET_FILENAMES or NAME_SECRET_RX.search(fn)
+                            or Path(fn).suffix.lower() in TEXT_EXTS) \
+                            and st.st_size < 1024 * 1024:
+                        secret_candidates.append((rel, fn))
+            except OSError:
+                # entry vanished between scandir and stat: skip it
+                continue
+        if current != root and not has_children:
+            rep['junk']['empty_dirs'].append(
+                str(Path(current).relative_to(root)))
+        stack.extend(reversed(subdirs))
+
+    # --- read-once, parallel content pass ------------------------------------
+    # Duplicates and secrets share ONE open per file: the per-open tax on
+    # Windows (defender/AV) dominates on large trees, so reads run in a
+    # small thread pool (I/O-bound; results are merged deterministically).
+    # Completeness is unchanged: every duplicate-size group is still
+    # two-stage hashed (4 KB head, then full for survivors), every secret
+    # candidate is still fully scanned.
+    dup_candidates = {rel for rels in size_groups.values() if len(rels) >= 2
+                      for rel in rels}
+    secret_set = {rel for rel, _fn in secret_candidates}
+
+    def _read_task(rel):
+        p = root / rel
+        head = None
+        text = None
+        try:
+            with p.open('rb') as fh:
+                if rel in dup_candidates:
+                    head = fh.read(4096)
+                    if len(head) < 4096:          # short file: this IS full
+                        data = head
+                    elif rel in secret_set:
+                        data = head + fh.read()
+                    else:
+                        data = None
+                elif rel in secret_set:
+                    data = fh.read()
+                else:
+                    data = None
+        except OSError:
+            return rel, None, None
+        if data is not None and rel in secret_set:
+            text = data.decode('utf-8', errors='replace')
+        return rel, head, text
+
+    from concurrent.futures import ThreadPoolExecutor
+    head_by_rel = {}
+    text_by_rel = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for rel, head, text in pool.map(_read_task,
+                                        sorted(dup_candidates | secret_set)):
+            if head is not None:
+                head_by_rel[rel] = head
+            if text is not None:
+                text_by_rel[rel] = text
+
+    # duplicates: group by head hash, full-hash only surviving groups
+    hashes = {}
+    for size, rels in size_groups.items():
+        if len(rels) < 2:
+            continue
+        first_stage = {}
+        for rel in rels:
+            head = head_by_rel.get(rel)
+            if head is None:
+                continue
+            first_stage.setdefault(hashlib.md5(head).hexdigest(), []).append(rel)
+        for group in first_stage.values():
+            if len(group) < 2:
+                continue
+            full = {}
+            for rel in group:
+                p = root / rel
+                try:
+                    h = hashlib.md5(p.read_bytes()).hexdigest()
+                except OSError:
+                    continue
+                full.setdefault(h, []).append(rel)
+            for h, paths in full.items():
+                if len(paths) > 1:
+                    hashes.setdefault(h, []).extend(paths)
+
+    # secrets: text was decoded during the shared pass
+    for rel, _fn in secret_candidates:
+        text = text_by_rel.get(rel)
+        if text is None:
+            continue
+        for hit in secscan.scan_text(rel, text):
+            if (rel, hit['line']) in seen_secret_lines:
+                continue
+            seen_secret_lines.add((rel, hit['line']))
+            rep['secrets'].append({'path': rel, 'line': hit['line'],
+                                   'kind': hit['kind'],
+                                   'mask': hit['mask'],
+                                   'fingerprint': hit['fingerprint'],
+                                   'confidence': hit['confidence']})
+
+    prof['walk'] = time.monotonic() - _tp; _tp = time.monotonic()
     for h, paths in hashes.items():
         if len(paths) > 1:
             sz = (root / paths[0]).stat().st_size
@@ -635,6 +739,7 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
             rep['top_level'].append({'name': entry.name, 'kind': 'file',
                                      'size_bytes': fsize})
     rep['dup_checkouts'] = {u: names for u, names in remotes.items() if len(names) > 1}
+    prof['top_git'] = time.monotonic() - _tp; _tp = time.monotonic()
 
     proj_ctx_dirs = [e for e in sorted(root.iterdir())
                      if e.is_dir() and (_exists(e / 'AGENTS.md') or _exists(e / 'CLAUDE.md'))]
@@ -672,6 +777,7 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
     rep['context_budget'] = chain_budget(root)
     rep['chain_budget_over'] = any(c['over'] for c in rep['context_budget'])
 
+    prof['context'] = time.monotonic() - _tp; _tp = time.monotonic()
     # --- stage-2 enrichment facts ------------------------------------------------
     repo_dirs = [str(root / t['name']) for t in rep['top_level']
                  if t.get('kind') == 'repo']
@@ -700,9 +806,12 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False):
     except OSError:
         rep['skills_extra'] = {}
 
+    prof['enrich'] = time.monotonic() - _tp; _tp = time.monotonic()
     rep['findings'] = collect_findings(rep)
     rep['gates'], rep['findings_detailed'] = gates_engine.evaluate(rep)
-    rep['stats'] = {'total_files': total_files,
+    prof['gates'] = time.monotonic() - _tp
+    rep['stats'] = {'profile': {k: round(v, 3) for k, v in prof.items()},
+                    'total_files': total_files,
                     'total_size_bytes': sum(per_top.values()),
                     'skipped_symlinks_outside': skipped_links,
                     'duration_sec': round(time.monotonic() - t0, 2)}
@@ -720,6 +829,8 @@ def main():
                          'never read as a pass')
     ap.add_argument('--history-all-refs', action='store_true',
                     help='deep-scan history across all refs, not only HEAD')
+    ap.add_argument('--profile', action='store_true',
+                    help='print per-stage timings (walk, git, context, enrich, gates) to stderr')
     ap.add_argument('--baseline', default=None, help='previous scan.json: adds a diff section (new findings only)')
     ap.add_argument('--out', default='scan.json', help='where to write the JSON report')
     a = ap.parse_args()
@@ -728,7 +839,9 @@ def main():
     if not root.is_dir():
         sys.exit('not a directory: ' + str(root))
     try:
-        rep = scan(root, home, a.deep, a.history_depth, a.history_all_refs)
+        prof = {} if a.profile else None
+        rep = scan(root, home, a.deep, a.history_depth,
+                   a.history_all_refs, profile=prof)
     except FingerprintKeyError as e:
         sys.exit('fingerprint key unavailable: %s\n'
                  'fix with: python skills/workspace-audit/scripts/fingerprint.py --check'
@@ -745,6 +858,9 @@ def main():
                            'resolved': [f for f in old.get('findings', [])
                                         if f['fp'] not in new_fps]}
     Path(a.out).write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding='utf-8')
+    if a.profile:
+        for k, v in sorted(rep['stats']['profile'].items()):
+            print('profile %-8s %8.2f s' % (k, v), file=sys.stderr)
     j = rep['junk']
     st = lambda s: sum(1 for g in rep['gates'] if g['status'] == s)
     print(f"scan: {rep['stats']['total_files']} files, "

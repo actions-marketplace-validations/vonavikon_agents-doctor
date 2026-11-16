@@ -9,7 +9,8 @@ in v1 (deliberately conservative):
 - GIT "No .gitignore in <repo>"           -> write a small .gitignore template
 - HLTH "Unused data (confirmed_unused)" with autofix_available
                                           -> move the path into
-                                             <root>/.workspace-audit-trash/<timestamp>/
+                                             <root>/.workspace-audit-trash/
+                                             <timestamp>-<opid>/
                                              keeping its relative path
 
 Every other finding raises UnsupportedError; no command of any kind is
@@ -22,8 +23,18 @@ Safety model:
 - an empty plan touches nothing and never prompts;
 - the trash directory name is the constant TRASH_DIR_NAME
   ('.workspace-audit-trash'); the generated .gitignore template lists
-  it, and trash moves never overwrite an existing destination;
+  it, and trash moves never overwrite an existing destination (a taken
+  name gets an '.__N__' suffix, see trashops.py);
+- trash moves go through trashops.move_to_trash: per-run operation id,
+  write-ahead manifest.json in the run directory, crash-recovery
+  detection of interrupted earlier runs. Undo a run with
+  `safe_clean.py restore <run_dir>`;
+- every planned target carries a plan-time TOCTOU snapshot {size,
+  mtime_ns, type}; apply re-stats rmdir and trash_move steps right
+  before acting and skips the step as 'changed' when the path changed
+  since planning;
 - rmdir goes through os.rmdir: a non-empty directory fails loudly;
+- a failing step is recorded and the run continues with the next step;
 - no network access, no git mutations, no overwrites.
 
 apply_plan(assume_yes=True) skips the interactive prompt; it exists for
@@ -38,30 +49,33 @@ CLI:
     python remediate.py <scan.json> <fid> [--apply] [--root R] [--reaudit]
 
 Exit codes: 0 ok (dry run, declined confirmation or clean apply), 1 IO
-or safety error, 3 no supported automatic fix.
+or safety error or failed steps, 3 no supported automatic fix.
 """
 import argparse
 import json
 import os
 import re
-import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit_scan  # noqa: E402  (BUILD_DIRS for the template, scan for reaudit)
+import trashops  # noqa: E402  (shared trash-run machinery)
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 PROG = 'remediate'
 
-# where moved junk lands: <root>/<TRASH_DIR_NAME>/<YYYYmmdd-HHMMSS>/<rel path>
-TRASH_DIR_NAME = '.workspace-audit-trash'
+# where moved junk lands:
+# <root>/<TRASH_DIR_NAME>/<YYYYmmdd-HHMMSS>-<opid>/<rel path> (trashops.py)
+TRASH_DIR_NAME = trashops.TRASH_DIR_NAME
 
 SKIPPED = 'skipped'
+# _execute_step sentinel: the target changed between plan() and apply;
+# the step is skipped, the disk is left alone for it
+CHANGED = 'changed'
 
 _LOCAL_IGNORE_LINES = ('.env', '.mcp.json', 'settings.local.json')
 
@@ -191,10 +205,12 @@ def plan(rep, fid):
                 'target': str(target),
                 'command': 'move "%s" -> "%s"' % (
                     target,
-                    root / TRASH_DIR_NAME / '<timestamp>' / _rel_under(target, root)),
+                    root / TRASH_DIR_NAME / '<timestamp>-<opid>'
+                    / _rel_under(target, root)),
                 'reversible': True,
-                'note': 'lands under %s/<timestamp>/ with the relative path '
-                        'kept; review, then delete the trash dir' % TRASH_DIR_NAME,
+                'note': 'lands under %s/<timestamp>-<opid>/ with the relative '
+                        'path kept; undo with safe_clean.py restore' % TRASH_DIR_NAME,
+                'snapshot': trashops.snapshot(target),
             })
         return steps
 
@@ -245,6 +261,7 @@ def plan(rep, fid):
                 'command': 'rmdir "%s"' % target,
                 'reversible': True,
                 'note': 'directory is empty; removing it loses no content',
+                'snapshot': trashops.snapshot(target),
             })
         return steps
 
@@ -269,10 +286,18 @@ def print_plan(fid, steps):
 
 # --- execution -----------------------------------------------------------------
 
-def _execute_step(step, root):
-    """Run one step; returns an executed-record dict or SKIPPED."""
+def _execute_step(step, root, get_run):
+    """Run one step; returns an executed-record dict, SKIPPED or
+    CHANGED. get_run() lazily creates the shared trash run (opid +
+    manifest) the first time a trash_move step needs it."""
     action = step.get('action')
     target = Path(step.get('target', ''))
+    if action in ('rmdir', 'trash_move'):
+        # TOCTOU re-stat right before acting: anything that changed
+        # since plan() is skipped as CHANGED, disk untouched
+        cur = trashops.snapshot(target)
+        if not trashops.unchanged(step.get('snapshot'), cur):
+            return CHANGED
     if action == 'rmdir':
         os.rmdir(str(target))  # loud failure when not empty or missing
         return {'action': action, 'target': str(target), 'result': 'removed'}
@@ -287,16 +312,15 @@ def _execute_step(step, root):
         src = target
         if not src.exists():
             raise OSError('source missing: %s' % src)
-        rel = src.resolve().relative_to(root)
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        dst = root / TRASH_DIR_NAME / stamp / rel
-        _require_inside(root, dst)
-        if dst.exists():
-            raise OSError('trash destination already exists: %s' % dst)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
+        rel = src.resolve().relative_to(root).as_posix()
+        snap = step.get('snapshot') or {}
+        run = get_run()
+        dst, _idx = trashops.move_to_trash(
+            run, src, rel, snap.get('size') or 0, snap.get('mtime_ns'),
+            snap.get('type'))
         return {'action': action, 'target': str(src),
-                'result': 'moved', 'moved_to': str(dst)}
+                'result': 'moved', 'moved_to': str(dst),
+                'trash_run': str(run.run_dir), 'opid': run.opid}
     raise ValueError('unknown action: %r' % (action,))
 
 
@@ -307,14 +331,19 @@ def apply_plan(steps, root, assume_yes=False):
     answer exactly 'yes' to the prompt. assume_yes=True skips the prompt
     (tests and automation only; the CLI never passes it). Every target
     is containment-checked against the resolved root before anything
-    runs, and the first failing step stops the whole run.
+    runs. A failing step is recorded and the run continues with the
+    next step; a step whose target changed since plan() is skipped as
+    {'reason': 'changed'}. Trash moves land in one trash run directory
+    (timestamp + opid) with a write-ahead manifest, undoable via
+    `safe_clean.py restore <run_dir>`.
 
     Returns {'executed': [...], 'failed': [...], 'skipped': [...],
-    'declined': bool}; declined=True means the confirmation was refused
-    and nothing ran.
+    'declined': bool, 'trash_run': str|None, 'opid': str|None};
+    declined=True means the confirmation was refused and nothing ran.
     """
     root = Path(root).resolve()
-    report = {'executed': [], 'failed': [], 'skipped': [], 'declined': False}
+    report = {'executed': [], 'failed': [], 'skipped': [], 'declined': False,
+              'trash_run': None, 'opid': None}
     steps = list(steps or [])
     if not steps:
         print('nothing to do: the plan is empty')
@@ -335,22 +364,45 @@ def apply_plan(steps, root, assume_yes=False):
             report['declined'] = True
             print('declined; nothing executed')
             return report
+
+    state = {'run': None}
+
+    def get_run():
+        if state['run'] is None:
+            state['run'] = trashops.TrashRun(
+                root, 'remediate', interrupted=trashops.find_interrupted(root))
+            report['trash_run'] = str(state['run'].run_dir)
+            report['opid'] = state['run'].opid
+        return state['run']
+
     for st in steps:
         try:
-            outcome = _execute_step(st, root)
-        except Exception as exc:  # first failure stops the run
+            outcome = _execute_step(st, root, get_run)
+        except Exception as exc:  # recorded, then the run continues
             report['failed'].append({'action': st.get('action'),
                                      'target': st.get('target'),
                                      'error': '%s: %s' % (type(exc).__name__, exc)})
-            print('%s: step failed, stopping: [%s] %s: %s'
+            print('%s: step failed, continuing: [%s] %s: %s'
                   % (PROG, st.get('action'), st.get('target'), exc),
                   file=sys.stderr)
-            break
+            continue
         if outcome == SKIPPED:
             report['skipped'].append({'action': st.get('action'),
                                       'target': st.get('target')})
+        elif outcome == CHANGED:
+            report['skipped'].append({'action': st.get('action'),
+                                      'target': st.get('target'),
+                                      'reason': 'changed'})
         else:
             report['executed'].append(outcome)
+    if state['run'] is not None:
+        state['run'].finish(
+            planned=len(steps),
+            moved=sum(1 for e in report['executed']
+                      if e.get('action') == 'trash_move'),
+            failed=len(report['failed']), skipped=len(report['skipped']),
+            removed_dirs=sum(1 for e in report['executed']
+                             if e.get('action') == 'rmdir'))
     return report
 
 
@@ -392,10 +444,11 @@ def main(argv=None):
                     'after explicit confirmation, optionally re-audit.',
         epilog='Supported fixes (v1): empty-dir rmdir; .gitignore template for '
                'a repo missing one; confirmed-unused junk moved into '
-               '%s/<timestamp>/. Everything else is refused with exit code 3. '
-               'No network, no git mutations, nothing outside the audited '
-               'root. Dry run by default; --apply still asks for the word '
-               '"yes".' % TRASH_DIR_NAME)
+               '%s/<timestamp>-<opid>/ (write-ahead manifest; undo with '
+               'safe_clean.py restore <run_dir>). Everything else is refused '
+               'with exit code 3. No network, no git mutations, nothing '
+               'outside the audited root. Dry run by default; --apply still '
+               'asks for the word "yes".' % TRASH_DIR_NAME)
     ap.add_argument('scan', help='scan.json from a previous audit')
     ap.add_argument('fid', help='finding id to fix (see workspace_audit.py explain)')
     ap.add_argument('--apply', action='store_true',
@@ -446,6 +499,11 @@ def main(argv=None):
             print('%s %s: executed %d, skipped %d, failed %d'
                   % (PROG, a.fid, len(report['executed']),
                      len(report['skipped']), len(report['failed'])))
+            if report.get('trash_run'):
+                print('trash run: %s (opid %s); undo with: safe_clean.py '
+                      'restore "%s"'
+                      % (report['trash_run'], report.get('opid'),
+                         report['trash_run']))
             for fail in report['failed']:
                 print('  failed [%s] %s: %s'
                       % (fail.get('action'), fail.get('target'), fail.get('error')),

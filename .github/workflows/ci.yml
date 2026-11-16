@@ -49,9 +49,15 @@ jobs:
           python -m coverage run -m unittest discover -s tests
           python -m coverage run qa/eval.py
           python -m coverage combine
-      - name: thresholds (secret module 90, deterministic core 85)
+      - name: per-module thresholds (spec v0.7.0 section 10)
         run: |
-          python -m coverage report --include='*secret_scanner*' --fail-under=90
+          python -m coverage report --include='*secret_scanner*'   --fail-under=95
+          python -m coverage report --include='*audit_scan*'      --fail-under=90
+          python -m coverage report --include='*gates*'           --fail-under=90
+          python -m coverage report --include='*safe_clean*'      --fail-under=90
+          python -m coverage report --include='*remediate*'       --fail-under=90
+          python -m coverage report --include='*report_generator*' --fail-under=90
+          python -m coverage report --include='*workspace_audit*' --fail-under=90
           python -m coverage report --fail-under=85
 
   validate:
@@ -64,6 +70,16 @@ jobs:
       - run: python tools/validate_manifest.py
       - run: python tools/validate_schema.py llm-eval/fixtures/clean.json
       - run: python tools/validate_schema.py llm-eval/fixtures/chaos.json
+      - run: python tools/check_links.py
+
+  llm-eval-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: deterministic grading pipeline, no network, no API keys
+        run: python llm-eval/run_eval.py --model offline
 
   benchmark:
     runs-on: ubuntu-latest
@@ -72,18 +88,34 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: python bench/gen_workspace.py bench/work/small --size small
-      - run: python bench/run_benchmark.py bench/work/small --home bench/work/home --label "ci (small)" --max-wall 60
+      - run: python bench/run_benchmark.py bench/work/small --home bench/work/home --label "ci linux (small)" --max-wall 60
       - run: python bench/gen_workspace.py bench/work/medium --size medium
-      - run: python bench/run_benchmark.py bench/work/medium --home bench/work/home --label "ci (medium)" --max-wall 420
+      - run: python bench/run_benchmark.py bench/work/medium --home bench/work/home --label "ci linux (medium)" --max-wall 120
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bench-results
+          name: bench-results-linux
+          path: bench/BENCH-*.md
+
+  benchmark-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python bench/gen_workspace.py bench/work/small --size small
+      - run: python bench/run_benchmark.py bench/work/small --home bench/work/home --label "ci windows (small)" --max-wall 10
+      - run: python bench/gen_workspace.py bench/work/medium --size medium
+      - run: python bench/run_benchmark.py bench/work/medium --home bench/work/home --label "ci windows (medium)" --max-wall 60
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results-windows
           path: bench/BENCH-*.md
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, tests, coverage, validate, benchmark]
+    needs: [lint, tests, coverage, validate, llm-eval-offline, benchmark, benchmark-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,20 +125,35 @@ jobs:
         with: {python-version: '3.12'}
       - run: python -m unittest discover -s tests
       - run: python tools/validate_manifest.py
-      - name: package zip (plugin files only)
+      - name: package zip from an explicit allowlist, then verify its contents
         run: |
           python - <<'EOF'
           import json, pathlib, zipfile
           root = pathlib.Path('.')
           ver = json.loads((root / '.claude-plugin/plugin.json').read_text())['version']
           out = f'workspace-audit-{ver}.zip'
-          skip = ('.git/', 'bench/work/', '.coverage')
+          # allowlist: exactly what an installed plugin needs (spec section 11)
+          allow = ['.claude-plugin/plugin.json', 'marketplace.json', 'LICENSE',
+                   'README.md', 'CHANGELOG.md']
+          for pattern in ('commands/*', 'skills/**/*', 'docs/*.md',
+                          'docs/schema/*.json'):
+              allow.extend(p.as_posix() for p in root.glob(pattern) if p.is_file())
+          existing = [a for a in allow if (root / a).is_file()]
+          missing = [a for a in allow if not (root / a).is_file()
+                     and a not in ('CHANGELOG.md',)]
+          assert not missing, 'allowlist references missing files: %s' % missing
           with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-              for p in root.rglob('*'):
-                  s = p.as_posix()
-                  if p.is_file() and not s.startswith(skip) and '__pycache__' not in s:
-                      z.write(p, s)
-          print('packaged', out)
+              for a in existing:
+                  z.write(root / a, a)
+          # verify: zip contents == allowlist, no tests/bench/CI junk inside
+          with zipfile.ZipFile(out) as z:
+              names = set(z.namelist())
+          assert names == set(existing), 'zip contents diverge from allowlist'
+          forbidden = ('tests/', 'bench/', '.github/', 'llm-eval/', 'qa/',
+                       'tools/', '.coveragerc', '.gitignore')
+          assert not any(n.startswith(forbidden) for n in names for forbidden in forbidden), \
+              'forbidden paths in the package'
+          print('packaged', out, len(names), 'files, allowlist verified')
           EOF
       - name: create release
         run: gh release create "$GITHUB_REF_NAME" workspace-audit-*.zip --generate-notes

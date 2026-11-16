@@ -152,3 +152,11 @@ every check passes, 1 otherwise.
 - `python skills/workspace-audit/scripts/report_human.py <scan.json> [--lang en|ru] [--sessions 10] [--after <scan2.json>] [--out HUMAN-REPORT.md]` — plain-language value report; `--after` produces the before/after story.
 - `python skills/workspace-audit/scripts/safe_clean.py <root> [--home H] [--yes] [--include-cautious] [--max-bytes N]` — guided safe cleanup; interactive typed-YES confirmation, trash-first, exit 0/1/2/3 (see `--help`).
 - `python tools/gen_sample_human_report.py` — regenerates the EN/RU sample reports from the chaos fixture.
+
+## Scanner flags added in v0.7.0
+
+- `--profile` — per-stage timings to stderr (walk, git, context, enrich, gates).
+- `--history-depth N` — cap the deep history scan per repo; coverage is reported and incomplete scans never read as pass.
+- `--history-all-refs` — deep-scan across all refs, not only HEAD.
+- `python skills/workspace-audit/scripts/safe_clean.py restore <run_dir> [--root R]` — restore a cleanup session from its manifest (typed YES).
+- `python llm-eval/run_eval.py --model offline` — the LLM-layer grading pipeline without network or API keys; `--model <name> --api <base-url> --key-env VAR` runs a real model against the frozen fixtures.
