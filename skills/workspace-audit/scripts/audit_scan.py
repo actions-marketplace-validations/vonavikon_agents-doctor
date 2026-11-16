@@ -519,6 +519,10 @@ def chain_budget(root):
 
 def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
          profile=None):
+    # canonical forms first: CI runners hand out short (8.3) or symlinked
+    # temp paths, and every containment check below compares against these
+    root = Path(root).resolve()
+    home = Path(home).resolve()
     prof = {} if profile is None else profile
     t0 = time.monotonic()
     _tp = t0
@@ -563,7 +567,9 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
                     real = Path(os.path.realpath(ent.path))
                 except OSError:
                     real = None
-                if real is not None and str(real) != os.path.normpath(ent.path)                         and not inside_root(real):
+                # escape = realpath lands outside the resolved root; any
+                # spelling difference that stays inside is harmless
+                if real is not None and not inside_root(real):
                     skipped_links += 1
                     if len(link_skips) < 8:
                         link_skips.append(ent.name)
