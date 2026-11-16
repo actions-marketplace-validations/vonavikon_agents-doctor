@@ -5,4 +5,5 @@ demo-scan.json
 __pycache__/
 *.pyc
 bench/work/
-.coverage*
+.coverage
+.coverage.*
