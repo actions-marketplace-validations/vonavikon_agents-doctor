@@ -1,0 +1,114 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install ruff
+      - run: ruff check --select E9,F63,F7,F82 .
+
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.12']
+        include:
+          - os: ubuntu-latest
+            python: '3.9'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '${{ matrix.python }}'}
+      - name: unit + integration + security regression
+        run: python -m unittest discover -s tests -v
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install coverage
+      - name: run under coverage (tests + scenario eval, subprocesses included)
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc
+        run: |
+          python -m coverage erase
+          python -m coverage run -m unittest discover -s tests
+          python -m coverage run qa/eval.py
+          python -m coverage combine
+      - name: thresholds (secret module 90, deterministic core 85)
+        run: |
+          python -m coverage report --include='*secret_scanner*' --fail-under=90
+          python -m coverage report --fail-under=85
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install jsonschema
+      - run: python tools/validate_manifest.py
+      - run: python tools/validate_schema.py llm-eval/fixtures/clean.json
+      - run: python tools/validate_schema.py llm-eval/fixtures/chaos.json
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python bench/gen_workspace.py bench/work/small --size small
+      - run: python bench/run_benchmark.py bench/work/small --home bench/work/home --label "ci (small)" --max-wall 60
+      - run: python bench/gen_workspace.py bench/work/medium --size medium
+      - run: python bench/run_benchmark.py bench/work/medium --home bench/work/home --label "ci (medium)" --max-wall 420
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench/BENCH-*.md
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, tests, coverage, validate, benchmark]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m unittest discover -s tests
+      - run: python tools/validate_manifest.py
+      - name: package zip (plugin files only)
+        run: |
+          python - <<'EOF'
+          import json, pathlib, zipfile
+          root = pathlib.Path('.')
+          ver = json.loads((root / '.claude-plugin/plugin.json').read_text())['version']
+          out = f'workspace-audit-{ver}.zip'
+          skip = ('.git/', 'bench/work/', '.coverage')
+          with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+              for p in root.rglob('*'):
+                  s = p.as_posix()
+                  if p.is_file() and not s.startswith(skip) and '__pycache__' not in s:
+                      z.write(p, s)
+          print('packaged', out)
+          EOF
+      - name: create release
+        run: gh release create "$GITHUB_REF_NAME" workspace-audit-*.zip --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

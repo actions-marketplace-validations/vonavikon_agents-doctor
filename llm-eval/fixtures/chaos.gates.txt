@@ -1,0 +1,9 @@
+G1 fail - Workspace structure
+G2 pass - Configuration integrity
+G3 fail - Rules consistency
+G4 fail - Directory ownership and discoverability
+G5 fail - Skills and agent capabilities
+G6 fail - Secrets and Git security
+G7 warn - Git hygiene
+G8 fail - Agent environment governance
+G9 warn - Workspace health and maintainability

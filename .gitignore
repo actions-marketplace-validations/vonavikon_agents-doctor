@@ -4,3 +4,5 @@ demo/fake-home/
 demo-scan.json
 __pycache__/
 *.pyc
+bench/work/
+.coverage*

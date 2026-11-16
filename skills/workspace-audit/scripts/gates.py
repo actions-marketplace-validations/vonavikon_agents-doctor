@@ -242,12 +242,23 @@ def _missing(run, prefix, title, section):
 
 
 def _skill_meta(entry, skills_extra):
-    """frontmatter facts from the merged entry keys, else from skills_extra."""
+    """frontmatter facts from the merged entry keys, else from skills_extra.
+
+    skills_frontmatter keys records by name when it parsed one and by file
+    path when it could not (a malformed block yields no name); match both
+    ways so malformed skills still reach their facts."""
     meta = {}
     for key in ('frontmatter_ok', 'missing_fields', 'dead_refs', 'parser'):
         if key in entry:
             meta[key] = entry[key]
-    for key, val in (skills_extra.get(entry.get('name')) or {}).items():
+    extra = skills_extra.get(entry.get('name'))
+    if extra is None:
+        entry_path = str(entry.get('path', ''))
+        for rec in skills_extra.values():
+            if isinstance(rec, dict) and rec.get('path') == entry_path:
+                extra = rec
+                break
+    for key, val in (extra or {}).items():
         meta.setdefault(key, val)
     return meta
 

@@ -525,7 +525,8 @@ def skills_frontmatter(entries):
         skill_dir = path.parent
         rec = {'frontmatter_ok': None,
                'missing_fields': list(REQUIRED_FRONTMATTER_FIELDS),
-               'dead_refs': [], 'parser': 'fallback'}
+               'dead_refs': [], 'parser': 'fallback',
+               'path': str(path)}
         try:
             text = path.read_text(encoding='utf-8', errors='replace')
         except OSError:

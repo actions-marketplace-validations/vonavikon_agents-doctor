@@ -1,0 +1,1585 @@
+{
+  "schema_version": "1.0",
+  "root": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace",
+  "home": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home",
+  "generated_at": "2026-11-16T16:21:28+03:00",
+  "top_level": [
+    {
+      "name": ".agents",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 2401
+    },
+    {
+      "name": ".mcp.json",
+      "kind": "file",
+      "size_bytes": 183
+    },
+    {
+      "name": "AGENTS.md",
+      "kind": "file",
+      "size_bytes": 65242
+    },
+    {
+      "name": "documents",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 15120
+    },
+    {
+      "name": "exports",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 8388608
+    },
+    {
+      "name": "legacy-crm",
+      "kind": "repo",
+      "git": {
+        "remote": "https://gitlab.example.com/legacy/crm.git",
+        "last_commit": "2026-09-15T12:00:00+03:00",
+        "dirty": [
+          "config.py"
+        ],
+        "untracked": []
+      },
+      "size_bytes": 44,
+      "extra": {
+        "branch": "master",
+        "ahead_behind": null,
+        "remote_class": "self-hosted",
+        "credentials_in_remote": false,
+        "gitignore": true,
+        "hooks": [
+          {
+            "name": "pre-push",
+            "flags": {
+              "add_all": false,
+              "push": true,
+              "secret_scan": false
+            }
+          }
+        ],
+        "sync_commits_last30": 0,
+        "tracked_secrets": [
+          {
+            "file": "config.py",
+            "line": 1,
+            "kind": "secret literal",
+            "rule_id": "SEC-005",
+            "confidence": 0.7,
+            "value": "[REDACTED]",
+            "fingerprint": "sha256:d65e365cdae5b78b"
+          }
+        ],
+        "nested_repos": [
+          "vendor\\engine"
+        ]
+      }
+    },
+    {
+      "name": "legacy-crm-hotfix",
+      "kind": "repo",
+      "git": {
+        "remote": "https://gitlab.example.com/legacy/crm.git",
+        "last_commit": "2026-07-01T10:00:00+03:00",
+        "dirty": [],
+        "untracked": []
+      },
+      "size_bytes": 10,
+      "extra": {
+        "branch": "hotfix/payments",
+        "ahead_behind": null,
+        "remote_class": "self-hosted",
+        "credentials_in_remote": false,
+        "gitignore": false,
+        "hooks": [],
+        "sync_commits_last30": 0,
+        "tracked_secrets": [],
+        "nested_repos": []
+      }
+    },
+    {
+      "name": "screenshots",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 6668
+    },
+    {
+      "name": "tools",
+      "kind": "repo",
+      "git": {
+        "remote": null,
+        "last_commit": "2026-08-10T16:00:00+03:00",
+        "dirty": [],
+        "untracked": []
+      },
+      "size_bytes": 390,
+      "extra": {
+        "branch": "master",
+        "ahead_behind": null,
+        "remote_class": null,
+        "credentials_in_remote": false,
+        "gitignore": false,
+        "hooks": [],
+        "sync_commits_last30": 0,
+        "tracked_secrets": [],
+        "nested_repos": []
+      }
+    },
+    {
+      "name": "Новая папка",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 0
+    },
+    {
+      "name": "старые презентации",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 54
+    }
+  ],
+  "dup_checkouts": {
+    "https://gitlab.example.com/legacy/crm.git": [
+      "legacy-crm",
+      "legacy-crm-hotfix"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "AGENTS.md",
+      "lines": 385,
+      "size_bytes": 64853,
+      "is_pointer": false,
+      "generic_markers": [
+        "структура репозитория"
+      ],
+      "dead_links": [],
+      "dead_paths": [
+        "scripts/deploy.sh",
+        "docs/runbook.md"
+      ],
+      "dead_commands": []
+    },
+    {
+      "path": ".zcode\\AGENTS.md",
+      "lines": 2,
+      "size_bytes": 34,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [],
+      "dead_commands": []
+    },
+    {
+      "path": ".claude\\CLAUDE.md",
+      "lines": 2,
+      "size_bytes": 46,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [],
+      "dead_commands": []
+    },
+    {
+      "path": "tools\\AGENTS.md",
+      "lines": 5,
+      "size_bytes": 199,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [
+        "docs/api.md"
+      ],
+      "dead_commands": []
+    },
+    {
+      "path": "tools\\CLAUDE.md",
+      "lines": 5,
+      "size_bytes": 179,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [
+        "config/defaults.yaml"
+      ],
+      "dead_commands": []
+    }
+  ],
+  "context_drift": [
+    {
+      "path": "tools",
+      "jaccard": 0.0
+    }
+  ],
+  "context_tax": {
+    "session_files": [
+      {
+        "role": "user-zcode",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\AGENTS.md",
+        "size_bytes": 37
+      },
+      {
+        "role": "user-claude",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.claude\\CLAUDE.md",
+        "size_bytes": 49
+      },
+      {
+        "role": "project",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\AGENTS.md",
+        "size_bytes": 65242
+      },
+      {
+        "role": "memory-index",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
+        "size_bytes": 42188
+      }
+    ],
+    "project_total_bytes": 65242,
+    "benchmark_project_bytes": 16384,
+    "memory_over_limit": [
+      "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
+    ],
+    "memory_over_lines": [
+      "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
+    ]
+  },
+  "harness": {
+    "tools": [
+      {
+        "tool": "zcode",
+        "exists": true,
+        "last_activity_days_ago": 0,
+        "state": "active",
+        "reads": [
+          "AGENTS.md"
+        ],
+        "evidence_source": "recursive mtime scan",
+        "confidence": 0.9,
+        "reason": "newest file 0 days old (4 files checked)"
+      },
+      {
+        "tool": "claude",
+        "exists": true,
+        "last_activity_days_ago": 200,
+        "state": "abandoned",
+        "reads": [
+          "CLAUDE.md",
+          "AGENTS.md"
+        ],
+        "evidence_source": "recursive mtime scan",
+        "confidence": 0.9,
+        "reason": "newest file 200 days old (1 files checked)"
+      },
+      {
+        "tool": "codex",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.codex",
+        "exists": false,
+        "reads": [
+          "AGENTS.md"
+        ]
+      }
+    ],
+    "project_dirs": [
+      {
+        "name": ".agents",
+        "exists": true
+      },
+      {
+        "name": ".claude",
+        "exists": false
+      },
+      {
+        "name": ".codex",
+        "exists": false
+      },
+      {
+        "name": ".zcode/config.json",
+        "exists": false
+      }
+    ],
+    "notes": [
+      "tools\\CLAUDE.md: maintained for a dead harness, claude inactive for 200 days"
+    ]
+  },
+  "skills": {
+    "entries": [
+      {
+        "name": "x-helper",
+        "desc_len": 382,
+        "has_triggers": false,
+        "md5": "b34d00b5427ccb3142e772ffd900749e",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+        "location": "user-zcode"
+      },
+      {
+        "name": "doc-helper",
+        "desc_len": 25,
+        "has_triggers": false,
+        "md5": "5ac1938e34b81994482907f7608e644c",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md",
+        "location": "project-agents"
+      },
+      {
+        "name": "x-helper",
+        "desc_len": 1190,
+        "has_triggers": false,
+        "md5": "5fb2eaef387983a5b082bfa1da303904",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
+        "location": "project-agents"
+      }
+    ],
+    "duplicates": [
+      {
+        "name": "x-helper",
+        "copies": 2,
+        "sync": "DIVERGED",
+        "paths": [
+          "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+          "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+        ]
+      }
+    ],
+    "locations_checked": [
+      "user-zcode: X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills",
+      "project-agents: X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills"
+    ]
+  },
+  "context_budget": [
+    {
+      "root": ".",
+      "total_bytes": 65447,
+      "over": true
+    },
+    {
+      "root": "tools",
+      "total_bytes": 205,
+      "over": false
+    }
+  ],
+  "chain_budget_over": true,
+  "findings": [
+    {
+      "fp": "6faf239cee58",
+      "section": "secrets",
+      "path": ".mcp.json"
+    },
+    {
+      "fp": "37d3a18be477",
+      "section": "dead_paths",
+      "path": "AGENTS.md | scripts/deploy.sh"
+    },
+    {
+      "fp": "504c9d586e67",
+      "section": "dead_paths",
+      "path": "AGENTS.md | docs/runbook.md"
+    },
+    {
+      "fp": "be0b6788ae99",
+      "section": "dead_paths",
+      "path": "tools\\AGENTS.md | docs/api.md"
+    },
+    {
+      "fp": "7f73d7e2d53c",
+      "section": "dead_paths",
+      "path": "tools\\CLAUDE.md | config/defaults.yaml"
+    },
+    {
+      "fp": "f49d668cd57e",
+      "section": "context_drift",
+      "path": "tools"
+    },
+    {
+      "fp": "b6e02b1735ae",
+      "section": "junk",
+      "path": "documents\\отчет-v1 (копия).pdf"
+    },
+    {
+      "fp": "c83f5f81acd1",
+      "section": "junk",
+      "path": "screenshots\\IMG_001.jpg"
+    },
+    {
+      "fp": "815fd66b5b37",
+      "section": "junk",
+      "path": "screenshots\\IMG_2022_09_01.jpg"
+    },
+    {
+      "fp": "2c9a779964b9",
+      "section": "junk",
+      "path": "screenshots\\IMG_2023_04_11.jpg"
+    },
+    {
+      "fp": "390b95e0566e",
+      "section": "junk",
+      "path": "старые презентации"
+    },
+    {
+      "fp": "4ce5e2b7eb29",
+      "section": "junk",
+      "path": "Новая папка"
+    },
+    {
+      "fp": "1cd970b3cbf9",
+      "section": "duplicates",
+      "path": "documents\\отчет-v1 (копия).pdf|documents\\отчет-v1.pdf"
+    },
+    {
+      "fp": "dc8269cf0b57",
+      "section": "large_files",
+      "path": "exports\\data-dump.csv"
+    },
+    {
+      "fp": "ff29efa62b9f",
+      "section": "skills",
+      "path": "x-helper"
+    },
+    {
+      "fp": "f023e1c02128",
+      "section": "harness",
+      "path": "tools\\CLAUDE.md: maintained for a dead harness, claude inactive for 200 days"
+    }
+  ],
+  "rules_version": "0.4.0",
+  "junk": {
+    "files": [
+      {
+        "path": "documents\\отчет-v1 (копия).pdf",
+        "reason": "copy",
+        "size_bytes": 7560
+      },
+      {
+        "path": "screenshots\\IMG_001.jpg",
+        "reason": "screenshot or photo",
+        "size_bytes": 2052
+      },
+      {
+        "path": "screenshots\\IMG_2022_09_01.jpg",
+        "reason": "screenshot or photo",
+        "size_bytes": 3076
+      },
+      {
+        "path": "screenshots\\IMG_2023_04_11.jpg",
+        "reason": "screenshot or photo",
+        "size_bytes": 1540
+      }
+    ],
+    "dirs": [
+      {
+        "path": "старые презентации",
+        "reason": "\"old\" dir",
+        "size_bytes": 54,
+        "files": 2
+      }
+    ],
+    "empty_dirs": [
+      "Новая папка"
+    ]
+  },
+  "duplicates": [
+    {
+      "size_bytes": 7560,
+      "files": [
+        "documents\\отчет-v1 (копия).pdf",
+        "documents\\отчет-v1.pdf"
+      ]
+    }
+  ],
+  "large_files": [
+    {
+      "path": "exports\\data-dump.csv",
+      "size_bytes": 8388608
+    }
+  ],
+  "secrets": [
+    {
+      "path": ".mcp.json",
+      "line": 6,
+      "kind": "api-key",
+      "mask": "sk-***",
+      "fingerprint": "sha256:424952bbfc6b2068",
+      "confidence": 0.95
+    }
+  ],
+  "gates": [
+    {
+      "schema_version": "1.0",
+      "gid": "G1",
+      "n": 1,
+      "name": "Workspace structure",
+      "description": "Workspace layout sanity: one instruction source per level, no unexpected nesting, no conflicting agent environments.",
+      "checks": [
+        {
+          "rule": "drifted-config-pairs",
+          "status": "fail"
+        },
+        {
+          "rule": "nested-repos",
+          "status": "warn"
+        },
+        {
+          "rule": "harness-env-conflict",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no drifted AGENTS.md/CLAUDE.md pairs, no nested repositories, project directories match the harnesses in use",
+      "fail_when": "an AGENTS.md/CLAUDE.md pair at one level is neither identical nor a pointer",
+      "warn_when": "a repository is nested inside another repository; project directories exist for several harnesses while at most one is active",
+      "status": "fail",
+      "evidence": [
+        "drifted config pairs: 1",
+        "nested repositories: 1",
+        "harness dirs present: 1, active among them: 1"
+      ],
+      "confidence": 0.85,
+      "recommendation": "Fix the layout: one instruction source per level, no nested repositories, project dirs only for harnesses in use.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G2",
+      "n": 2,
+      "name": "Configuration integrity",
+      "description": "Configuration files parse and have no duplicate keys.",
+      "checks": [
+        {
+          "rule": "config-parse",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "every configuration file parses and each key occurs once",
+      "fail_when": "a configuration file has a syntax error or duplicate keys",
+      "warn_when": "no configuration files were found at all",
+      "status": "pass",
+      "evidence": [
+        "config files parsed: 1, broken: 0"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Fix or remove broken config files; keep one key per setting.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G3",
+      "n": 3,
+      "name": "Rules consistency",
+      "description": "Instruction files resolve, agree and stay within budgets.",
+      "checks": [
+        {
+          "rule": "dead-references",
+          "status": "fail"
+        },
+        {
+          "rule": "generic-markers",
+          "status": "warn"
+        },
+        {
+          "rule": "instruction-size",
+          "status": "warn"
+        },
+        {
+          "rule": "pair-drift",
+          "status": "fail"
+        },
+        {
+          "rule": "chain-budget",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no dead references, no drifted pairs, no boilerplate, files within the 16 KB benchmark and the 32768-byte chain budget",
+      "fail_when": "dead links, paths or commands; a drifted AGENTS.md/CLAUDE.md pair",
+      "warn_when": "generic boilerplate in auto-loaded context; an instruction file over 16 KB; the AGENTS.md chain over 32768 bytes",
+      "status": "fail",
+      "evidence": [
+        "instruction files checked: 5, dead references: 4",
+        "generic markers: 1",
+        "instruction files over benchmark: 1",
+        "drifted pairs: 1",
+        "chains over budget: 1"
+      ],
+      "confidence": 0.7,
+      "recommendation": "Repair dead references, merge drifted pairs, replace boilerplate with project-specific rules.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G4",
+      "n": 4,
+      "name": "Directory ownership and discoverability",
+      "description": "Every directory has a decided fate; valuable data sits under version control.",
+      "checks": [
+        {
+          "rule": "heavy-outside-git",
+          "status": "fail"
+        },
+        {
+          "rule": "unowned-top-dirs",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no heavy data directories outside git, no loose top-level folders",
+      "fail_when": "a heavy non-build directory sits outside every git repository",
+      "warn_when": "other top-level folders outside version control",
+      "status": "fail",
+      "evidence": [
+        "heavy dirs outside git: 1",
+        "top-level dirs outside git: 5"
+      ],
+      "confidence": 0.9,
+      "recommendation": "Give every folder a fate: version control, archive or deletion.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G5",
+      "n": 5,
+      "name": "Skills and agent capabilities",
+      "description": "Skills have valid frontmatter, usable descriptions and synced copies.",
+      "checks": [
+        {
+          "rule": "frontmatter",
+          "status": "pass"
+        },
+        {
+          "rule": "description-length",
+          "status": "fail"
+        },
+        {
+          "rule": "triggers",
+          "status": "warn"
+        },
+        {
+          "rule": "skill-dead-refs",
+          "status": "pass"
+        },
+        {
+          "rule": "duplicate-copies",
+          "status": "fail"
+        }
+      ],
+      "pass_when": "frontmatter parses with the required fields, descriptions are under 1024 chars with triggers, copies are identical, references resolve",
+      "fail_when": "missing name or description, unparseable frontmatter, a description over 1024 chars, diverged copies of one skill",
+      "warn_when": "no trigger phrase in a description; a skill references a missing file; frontmatter parsed with the fallback parser (unknown)",
+      "status": "fail",
+      "evidence": [
+        "skills checked: 3, frontmatter failures: 0, unverified: 0",
+        "descriptions over 1024 chars: 1",
+        "skills without triggers: 3",
+        "dead skill references: 0",
+        "skill name collisions: 1, diverged: 1"
+      ],
+      "confidence": 0.8,
+      "recommendation": "Repair skill frontmatter, shorten descriptions, sync or remove diverged copies.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G6",
+      "n": 6,
+      "name": "Secrets and Git security",
+      "description": "No secrets in files, index or remote URLs; a secret scan guards commits.",
+      "checks": [
+        {
+          "rule": "exposed-secrets",
+          "status": "fail"
+        },
+        {
+          "rule": "tracked-secrets",
+          "status": "fail"
+        },
+        {
+          "rule": "secret-prevention",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no secrets in worktree files, git index or remote URLs, and a pre-commit/pre-push hook runs a secret scan",
+      "fail_when": "an exposed, staged or tracked secret; credentials in a remote URL",
+      "warn_when": "no secret-prevention mechanism exists (absence of prevention is never a pass)",
+      "status": "fail",
+      "evidence": [
+        "secrets found in workspace files: 1",
+        "secret hits in git (index, remote URLs): 1",
+        "secret scan hooks found: 0 (repositories scanned: 3)"
+      ],
+      "confidence": 0.7,
+      "recommendation": "Rotate exposed secrets, remove them from files and history, add a pre-commit secret scan.",
+      "doc_ref": "README.md#security-model"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G7",
+      "n": 7,
+      "name": "Git hygiene",
+      "description": "Repositories are clean, ignored properly and free of oversized files.",
+      "checks": [
+        {
+          "rule": "worktree-clean",
+          "status": "warn"
+        },
+        {
+          "rule": "gitignore-present",
+          "status": "warn"
+        },
+        {
+          "rule": "tracked-big-files",
+          "status": "pass"
+        },
+        {
+          "rule": "single-checkout",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "clean worktrees, .gitignore present, no tracked file over 5 MB, one checkout per remote",
+      "fail_when": "a tracked file over 5 MB",
+      "warn_when": "uncommitted or untracked work; a repo without .gitignore; several checkouts of one remote",
+      "status": "warn",
+      "evidence": [
+        "repos with uncommitted work: 1 of 3",
+        "repos without .gitignore: 2",
+        "tracked files over 5 MB: 0",
+        "remotes with several checkouts: 1"
+      ],
+      "confidence": 0.9,
+      "recommendation": "Commit or stash local work, add .gitignore, move big files out of git, keep one checkout per remote.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G8",
+      "n": 8,
+      "name": "Agent environment governance",
+      "description": "One owner per rule; no instructions for dead harnesses; clean MCP config.",
+      "checks": [
+        {
+          "rule": "dead-harness-instructions",
+          "status": "fail"
+        },
+        {
+          "rule": "drift-ownership",
+          "status": "pass"
+        },
+        {
+          "rule": "mcp-duplicate-keys",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no dead-harness instructions, drifted pairs owned by G1/G3 (cross-referenced here), no duplicate keys in MCP configs",
+      "fail_when": "instructions maintained for a dead harness; duplicate keys in an MCP configuration",
+      "warn_when": "nothing (cross-references are informational)",
+      "status": "fail",
+      "evidence": [
+        "governance notes: 1",
+        "drifted pairs: 1, owned by G1/G3 findings (DIR-001, RUL-007)",
+        "MCP configs with duplicate keys: 0"
+      ],
+      "confidence": 0.85,
+      "recommendation": "Retire instructions for dead harnesses; keep one owner per rule and one key per MCP server.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G9",
+      "n": 9,
+      "name": "Workspace health and maintainability",
+      "description": "Junk, build artifacts and oversized files stay within healthy limits.",
+      "checks": [
+        {
+          "rule": "classified-junk",
+          "status": "warn"
+        },
+        {
+          "rule": "junk-volume",
+          "status": "pass"
+        },
+        {
+          "rule": "empty-dirs",
+          "status": "pass"
+        },
+        {
+          "rule": "occasional-harness",
+          "status": "pass"
+        },
+        {
+          "rule": "large-untracked-files",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no classified junk, total junk+build under 500 MB, few empty dirs, no occasional harnesses, no large files outside git",
+      "fail_when": "junk and build artifacts together exceed 500 MB",
+      "warn_when": "confirmed or potentially unused junk; more than 10 empty dirs; an occasional harness; a file over 5 MB outside git",
+      "status": "warn",
+      "evidence": [
+        "classified junk items: 5",
+        "junk+build total: 0 MB across 4 files and 1 dirs",
+        "empty dirs: 1 (at or below 10)",
+        "occasional harnesses: 0",
+        "large files outside git: 1"
+      ],
+      "confidence": 0.5,
+      "recommendation": "Delete or archive junk, watch the total size, keep occasional harnesses as a deliberate choice.",
+      "doc_ref": "README.md#limits-and-thresholds"
+    }
+  ],
+  "stats": {
+    "total_files": 18,
+    "total_size_bytes": 8478720,
+    "skipped_symlinks_outside": 0,
+    "duration_sec": 0.5
+  },
+  "config_integrity": [
+    {
+      "path": ".mcp.json",
+      "format": "json",
+      "ok": true,
+      "error": null,
+      "dup_keys": []
+    }
+  ],
+  "heavy_outside_git": [
+    {
+      "path": "exports",
+      "size_bytes": 8388608,
+      "depth": 1
+    }
+  ],
+  "junk_classified": [
+    {
+      "path": "documents\\отчет-v1 (копия).pdf",
+      "reason": "copy",
+      "size_bytes": 7560,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    },
+    {
+      "path": "screenshots\\IMG_001.jpg",
+      "reason": "screenshot or photo",
+      "size_bytes": 2052,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    },
+    {
+      "path": "screenshots\\IMG_2022_09_01.jpg",
+      "reason": "screenshot or photo",
+      "size_bytes": 3076,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    },
+    {
+      "path": "screenshots\\IMG_2023_04_11.jpg",
+      "reason": "screenshot or photo",
+      "size_bytes": 1540,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    },
+    {
+      "path": "старые презентации",
+      "reason": "\"old\" dir",
+      "size_bytes": 54,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    }
+  ],
+  "skills_extra": {
+    "x-helper": {
+      "frontmatter_ok": true,
+      "missing_fields": [],
+      "dead_refs": [],
+      "parser": "yaml"
+    },
+    "doc-helper": {
+      "frontmatter_ok": true,
+      "missing_fields": [],
+      "dead_refs": [],
+      "parser": "yaml"
+    }
+  },
+  "findings_detailed": [
+    {
+      "schema_version": "1.0",
+      "fid": "DIR-001",
+      "gate": "G1",
+      "category": "dirs",
+      "severity": "high",
+      "status": "fail",
+      "title": "Drifted AGENTS.md/CLAUDE.md pair in tools",
+      "description": "AGENTS.md and CLAUDE.md at the same level are neither identical nor linked by a pointer; two rule sources diverge over time.",
+      "evidence": [
+        {
+          "location": "tools",
+          "jaccard": 0.0
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Keep one file as the source and turn the other into a pointer to it.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "DIR-002",
+      "gate": "G1",
+      "category": "dirs",
+      "severity": "medium",
+      "status": "warn",
+      "title": "Nested repository in legacy-crm: vendor\\engine",
+      "description": "A git repository lives inside another repository; the outer one sees it as embedded untracked content and sync tools mis-handle it.",
+      "evidence": [
+        {
+          "repo": "legacy-crm",
+          "nested": "vendor\\engine"
+        }
+      ],
+      "confidence": 0.85,
+      "recommendation": "Register it as a submodule or move it out to the workspace top level.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-001",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Dead path in AGENTS.md: scripts/deploy.sh",
+      "description": "The instruction file points to 'scripts/deploy.sh' which does not exist; an agent following it fails or improvises.",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "ref": "scripts/deploy.sh",
+          "kind": "path"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Fix or remove the reference.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-002",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Dead path in AGENTS.md: docs/runbook.md",
+      "description": "The instruction file points to 'docs/runbook.md' which does not exist; an agent following it fails or improvises.",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "ref": "docs/runbook.md",
+          "kind": "path"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Fix or remove the reference.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-003",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Dead path in tools\\AGENTS.md: docs/api.md",
+      "description": "The instruction file points to 'docs/api.md' which does not exist; an agent following it fails or improvises.",
+      "evidence": [
+        {
+          "file": "tools\\AGENTS.md",
+          "ref": "docs/api.md",
+          "kind": "path"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Fix or remove the reference.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-004",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Dead path in tools\\CLAUDE.md: config/defaults.yaml",
+      "description": "The instruction file points to 'config/defaults.yaml' which does not exist; an agent following it fails or improvises.",
+      "evidence": [
+        {
+          "file": "tools\\CLAUDE.md",
+          "ref": "config/defaults.yaml",
+          "kind": "path"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Fix or remove the reference.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-005",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "low",
+      "status": "warn",
+      "title": "Generic boilerplate in AGENTS.md: 'структура репозитория'",
+      "description": "Template or overview text inside auto-loaded context spends the context budget without giving the agent rules.",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "marker": "структура репозитория"
+        }
+      ],
+      "confidence": 0.7,
+      "recommendation": "Replace the boilerplate with project-specific rules or drop it.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-006",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "low",
+      "status": "warn",
+      "title": "Instruction file over 16 KB: AGENTS.md",
+      "description": "The file is 63 KB; the project-instruction benchmark is 16 KB, everything above it taxes every session.",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "size": "63 KB"
+        }
+      ],
+      "confidence": 0.85,
+      "recommendation": "Split the file: keep rules auto-loaded, move the rest to linked docs.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-007",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "high",
+      "status": "fail",
+      "title": "Two rule sources at tools",
+      "description": "AGENTS.md and CLAUDE.md at the same level disagree (similarity 0.0); each edit widens the gap.",
+      "evidence": [
+        {
+          "location": "tools",
+          "jaccard": 0.0
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Keep one file as the source and make the other a pointer (structure view: G1).",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "RUL-008",
+      "gate": "G3",
+      "category": "rules",
+      "severity": "medium",
+      "status": "warn",
+      "title": "AGENTS.md chain over 32768 bytes",
+      "description": "The root plus nested AGENTS.md chain exceeds the Codex budget; the tail is truncated silently.",
+      "evidence": [
+        {
+          "chain": ".",
+          "bytes": 65447
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Trim the chain or split nested instructions into linked files.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "DIR-003",
+      "gate": "G4",
+      "category": "dirs",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Heavy directory outside git: exports",
+      "description": "The directory holds 8192 KB of data, is not a build artifact and sits outside every git repository; its fate is undecided.",
+      "evidence": [
+        {
+          "path": "exports",
+          "size": "8192 KB",
+          "depth": 1
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Move it under version control, archive it, or delete it.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "DIR-004",
+      "gate": "G4",
+      "category": "dirs",
+      "severity": "low",
+      "status": "warn",
+      "title": "5 top-level folders outside version control",
+      "description": "These folders are not git repositories; their content has no history and no backup.",
+      "evidence": [
+        {
+          "path": ".agents",
+          "size": "2 KB"
+        },
+        {
+          "path": "documents",
+          "size": "14 KB"
+        },
+        {
+          "path": "screenshots",
+          "size": "6 KB"
+        },
+        {
+          "path": "Новая папка",
+          "size": "0 KB"
+        },
+        {
+          "path": "старые презентации",
+          "size": "0 KB"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Decide for each folder: make it a repo, move it into one, or remove it.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SKL-001",
+      "gate": "G5",
+      "category": "skills",
+      "severity": "low",
+      "status": "warn",
+      "title": "No triggers in the description of skill 'x-helper'",
+      "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
+      "evidence": [
+        {
+          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md"
+        }
+      ],
+      "confidence": 0.8,
+      "recommendation": "Add a trigger phrase (\"use when ...\") to the description.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SKL-002",
+      "gate": "G5",
+      "category": "skills",
+      "severity": "low",
+      "status": "warn",
+      "title": "No triggers in the description of skill 'doc-helper'",
+      "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
+      "evidence": [
+        {
+          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md"
+        }
+      ],
+      "confidence": 0.8,
+      "recommendation": "Add a trigger phrase (\"use when ...\") to the description.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SKL-003",
+      "gate": "G5",
+      "category": "skills",
+      "severity": "high",
+      "status": "fail",
+      "title": "Description of skill 'x-helper' is 1190 chars, limit 1024",
+      "description": "The harness refuses to load a skill whose description exceeds the limit.",
+      "evidence": [
+        {
+          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
+          "desc_len": 1190
+        }
+      ],
+      "confidence": 0.95,
+      "recommendation": "Shorten the description; move details into the skill body.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SKL-004",
+      "gate": "G5",
+      "category": "skills",
+      "severity": "low",
+      "status": "warn",
+      "title": "No triggers in the description of skill 'x-helper'",
+      "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
+      "evidence": [
+        {
+          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+        }
+      ],
+      "confidence": 0.8,
+      "recommendation": "Add a trigger phrase (\"use when ...\") to the description.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SKL-005",
+      "gate": "G5",
+      "category": "skills",
+      "severity": "high",
+      "status": "fail",
+      "title": "Diverged copies of skill 'x-helper'",
+      "description": "2 copies of the skill exist and their content differs; edits land in one copy while the harness loads another.",
+      "evidence": [
+        {
+          "name": "x-helper",
+          "copies": 2,
+          "paths": [
+            "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+            "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+          ]
+        }
+      ],
+      "confidence": 0.95,
+      "recommendation": "Pick one canonical location and delete or sync the rest.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SEC-001",
+      "gate": "G6",
+      "category": "secrets",
+      "severity": "critical",
+      "status": "fail",
+      "title": "Exposed secret in .mcp.json:6",
+      "description": "A api-key was detected in a workspace file; the value is redacted, only the mask and fingerprint are recorded.",
+      "evidence": [
+        {
+          "file": ".mcp.json",
+          "line": 6,
+          "kind": "api-key",
+          "mask": "sk-***",
+          "fingerprint": "sha256:424952bbfc6b2068"
+        }
+      ],
+      "confidence": 0.95,
+      "recommendation": "Rotate the secret at its provider, remove it from the file and purge it from history.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SEC-002",
+      "gate": "G6",
+      "category": "secrets",
+      "severity": "critical",
+      "status": "fail",
+      "title": "Secret tracked in git at legacy-crm: config.py:1",
+      "description": "A secret literal sits in a tracked or staged file; it leaves the machine with the next push.",
+      "evidence": [
+        {
+          "repo": "legacy-crm",
+          "file": "config.py",
+          "line": 1,
+          "kind": "secret literal",
+          "fingerprint": "sha256:d65e365cdae5b78b"
+        }
+      ],
+      "confidence": 0.7,
+      "recommendation": "Rotate the secret, `git rm --cached` the file and purge the history.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SEC-003",
+      "gate": "G6",
+      "category": "secrets",
+      "severity": "medium",
+      "status": "warn",
+      "title": "No secret-prevention mechanism found",
+      "description": "No pre-commit/pre-push hook runs a secret scan in any of the 3 repositories. A .gitignore alone is not proof: coverage of .env, .mcp.json is not derivable from the collected facts, so absence of a hook is treated as no prevention.",
+      "evidence": [
+        {
+          "detail": "no pre-commit/pre-push hook with secret scan in any repository",
+          "repositories scanned": 3
+        }
+      ],
+      "confidence": 0.85,
+      "recommendation": "Install a pre-commit secret scan (gitleaks or equivalent) in every active repository.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "GIT-001",
+      "gate": "G7",
+      "category": "git",
+      "severity": "low",
+      "status": "warn",
+      "title": "Uncommitted work in legacy-crm",
+      "description": "1 modified and 0 untracked paths; local-only work is one disk failure away from loss.",
+      "evidence": [
+        {
+          "repo": "legacy-crm",
+          "dirty": 1,
+          "untracked": 0
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Commit or stash the changes; push if the repo has a remote.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "GIT-002",
+      "gate": "G7",
+      "category": "git",
+      "severity": "low",
+      "status": "warn",
+      "title": "No .gitignore in legacy-crm-hotfix",
+      "description": "Without .gitignore, build artifacts and local config land in commits.",
+      "evidence": [
+        {
+          "repo": "legacy-crm-hotfix"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Add a .gitignore covering build dirs and local config files.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "GIT-003",
+      "gate": "G7",
+      "category": "git",
+      "severity": "low",
+      "status": "warn",
+      "title": "No .gitignore in tools",
+      "description": "Without .gitignore, build artifacts and local config land in commits.",
+      "evidence": [
+        {
+          "repo": "tools"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Add a .gitignore covering build dirs and local config files.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "GIT-004",
+      "gate": "G7",
+      "category": "git",
+      "severity": "low",
+      "status": "warn",
+      "title": "Multiple checkouts of one remote: legacy-crm, legacy-crm-hotfix",
+      "description": "The same repository is checked out 2 times; edits in one copy do not reach the others.",
+      "evidence": [
+        {
+          "remote": "https://gitlab.example.com/legacy/crm.git",
+          "checkouts": [
+            "legacy-crm",
+            "legacy-crm-hotfix"
+          ]
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Keep one checkout or make the others deliberate worktrees.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "GOV-001",
+      "gate": "G8",
+      "category": "governance",
+      "severity": "medium",
+      "status": "fail",
+      "title": "Instructions maintained for a dead harness",
+      "description": "An instruction file is kept for a harness that has been idle: tools\\CLAUDE.md: maintained for a dead harness, claude inactive for 200 days",
+      "evidence": [
+        {
+          "detail": "tools\\CLAUDE.md: maintained for a dead harness, claude inactive for 200 days"
+        }
+      ],
+      "confidence": 0.85,
+      "recommendation": "Remove the file or convert it to a pointer under the harness actually in use.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-001",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): documents\\отчет-v1 (копия).pdf",
+      "description": "Classified as potentially_unused (confidence 0.5): copy.",
+      "evidence": [
+        {
+          "path": "documents\\отчет-v1 (копия).pdf",
+          "reason": "copy",
+          "size": "7 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-002",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): screenshots\\IMG_001.jpg",
+      "description": "Classified as potentially_unused (confidence 0.5): screenshot or photo.",
+      "evidence": [
+        {
+          "path": "screenshots\\IMG_001.jpg",
+          "reason": "screenshot or photo",
+          "size": "2 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-003",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): screenshots\\IMG_2022_09_01.jpg",
+      "description": "Classified as potentially_unused (confidence 0.5): screenshot or photo.",
+      "evidence": [
+        {
+          "path": "screenshots\\IMG_2022_09_01.jpg",
+          "reason": "screenshot or photo",
+          "size": "3 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-004",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): screenshots\\IMG_2023_04_11.jpg",
+      "description": "Classified as potentially_unused (confidence 0.5): screenshot or photo.",
+      "evidence": [
+        {
+          "path": "screenshots\\IMG_2023_04_11.jpg",
+          "reason": "screenshot or photo",
+          "size": "1 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-005",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): старые презентации",
+      "description": "Classified as potentially_unused (confidence 0.5): \"old\" dir.",
+      "evidence": [
+        {
+          "path": "старые презентации",
+          "reason": "\"old\" dir",
+          "size": "0 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-006",
+      "gate": "G9",
+      "category": "health",
+      "severity": "info",
+      "status": "pass",
+      "title": "1 empty directories",
+      "description": "A few empty dirs are harmless; recorded as an observation.",
+      "evidence": [
+        {
+          "path": "Новая папка"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Optional: remove the empty directories.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-007",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "File over 5 MB outside git: exports\\data-dump.csv",
+      "description": "Large files outside version control; check whether they are data worth keeping.",
+      "evidence": [
+        {
+          "path": "exports\\data-dump.csv",
+          "size": "8192 KB"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Move under version control (git-lfs if needed) or delete.",
+      "autofix_available": false
+    }
+  ]
+}

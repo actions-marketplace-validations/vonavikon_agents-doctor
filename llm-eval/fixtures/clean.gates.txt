@@ -1,0 +1,9 @@
+G1 pass - Workspace structure
+G2 warn - Configuration integrity
+G3 pass - Rules consistency
+G4 warn - Directory ownership and discoverability
+G5 pass - Skills and agent capabilities
+G6 warn - Secrets and Git security
+G7 pass - Git hygiene
+G8 pass - Agent environment governance
+G9 warn - Workspace health and maintainability

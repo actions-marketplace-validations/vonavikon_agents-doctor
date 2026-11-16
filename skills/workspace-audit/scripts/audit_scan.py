@@ -255,7 +255,7 @@ def harness_report(home, root):
     return {'tools': tools, 'project_dirs': proj, 'notes': []}
 
 
-def context_checks(d, base):
+def context_checks(d, base, origin='project'):
     files = {}
     for name in ('AGENTS.md', 'CLAUDE.md'):
         f = d / name
@@ -298,6 +298,7 @@ def context_checks(d, base):
                 dead_cmds.append('make ' + m.group(1))
         entries.append({
             'path': str((d / name).relative_to(base)),
+            'origin': origin,
             'lines': len(lines),
             'size_bytes': len(text.encode('utf-8')),
             'is_pointer': is_pointer,
@@ -610,10 +611,12 @@ def scan(root, home, deep=False):
 
     proj_ctx_dirs = [e for e in sorted(root.iterdir())
                      if e.is_dir() and ((e / 'AGENTS.md').exists() or (e / 'CLAUDE.md').exists())]
-    for d, base in [(root, root), (home / '.zcode', home), (home / '.claude', home)] + \
-                   [(e, root) for e in proj_ctx_dirs]:
+    for d, base, origin in [(root, root, 'project'),
+                            (home / '.zcode', home, 'home'),
+                            (home / '.claude', home, 'home')] + \
+                   [(e, root, 'project') for e in proj_ctx_dirs]:
         if d.exists():
-            entries, drift = context_checks(d, base)
+            entries, drift = context_checks(d, base, origin)
             rep['context_files'].extend(entries)
             if drift:
                 rep['context_drift'].append(drift)
@@ -632,7 +635,7 @@ def scan(root, home, deep=False):
     if claude and claude.get('state') == 'abandoned':
         for e in rep['context_files']:
             if e['path'].endswith('CLAUDE.md') and not e['is_pointer'] \
-                    and not e['path'].startswith('.claude'):
+                    and e.get('origin') != 'home':
                 rep['harness']['notes'].append(
                     f"{e['path']}: maintained for a dead harness, claude inactive for "
                     f"{claude.get('last_activity_days_ago')} days")
@@ -643,7 +646,8 @@ def scan(root, home, deep=False):
     rep['chain_budget_over'] = any(c['over'] for c in rep['context_budget'])
 
     # --- stage-2 enrichment facts ------------------------------------------------
-    repo_dirs = [t['name'] for t in rep['top_level'] if t.get('kind') == 'repo']
+    repo_dirs = [str(root / t['name']) for t in rep['top_level']
+                 if t.get('kind') == 'repo']
     try:
         rep['config_integrity'] = enrich.config_integrity(root, repo_dirs)
     except OSError:

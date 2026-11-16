@@ -1,0 +1,647 @@
+{
+  "schema_version": "1.0",
+  "root": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace",
+  "home": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home",
+  "generated_at": "2026-11-16T16:21:26+03:00",
+  "top_level": [
+    {
+      "name": ".agents",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 255
+    },
+    {
+      "name": "AGENTS.md",
+      "kind": "file",
+      "size_bytes": 284
+    },
+    {
+      "name": "docs",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 68
+    },
+    {
+      "name": "docs-vault",
+      "kind": "repo",
+      "git": {
+        "remote": "https://gitlab.example.com/infra/docs-vault.git",
+        "last_commit": "2026-10-29T10:00:00+03:00",
+        "dirty": [],
+        "untracked": []
+      },
+      "size_bytes": 139,
+      "extra": {
+        "branch": "master",
+        "ahead_behind": null,
+        "remote_class": "self-hosted",
+        "credentials_in_remote": false,
+        "gitignore": true,
+        "hooks": [],
+        "sync_commits_last30": 0,
+        "tracked_secrets": [],
+        "nested_repos": []
+      }
+    },
+    {
+      "name": "incoming",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 121
+    },
+    {
+      "name": "reports",
+      "kind": "dir",
+      "git": null,
+      "size_bytes": 62
+    }
+  ],
+  "dup_checkouts": {},
+  "context_files": [
+    {
+      "path": "AGENTS.md",
+      "lines": 5,
+      "size_bytes": 278,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [],
+      "dead_commands": []
+    },
+    {
+      "path": ".zcode\\AGENTS.md",
+      "lines": 3,
+      "size_bytes": 113,
+      "is_pointer": false,
+      "generic_markers": [],
+      "dead_links": [],
+      "dead_paths": [],
+      "dead_commands": []
+    }
+  ],
+  "context_drift": [],
+  "context_tax": {
+    "session_files": [
+      {
+        "role": "user-zcode",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\AGENTS.md",
+        "size_bytes": 117
+      },
+      {
+        "role": "project",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\AGENTS.md",
+        "size_bytes": 284
+      },
+      {
+        "role": "memory-index",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
+        "size_bytes": 3478
+      }
+    ],
+    "project_total_bytes": 284,
+    "benchmark_project_bytes": 16384,
+    "memory_over_limit": [],
+    "memory_over_lines": []
+  },
+  "harness": {
+    "tools": [
+      {
+        "tool": "zcode",
+        "exists": true,
+        "last_activity_days_ago": 0,
+        "state": "active",
+        "reads": [
+          "AGENTS.md"
+        ],
+        "evidence_source": "recursive mtime scan",
+        "confidence": 0.9,
+        "reason": "newest file 0 days old (3 files checked)"
+      },
+      {
+        "tool": "claude",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.claude",
+        "exists": false,
+        "reads": [
+          "CLAUDE.md",
+          "AGENTS.md"
+        ]
+      },
+      {
+        "tool": "codex",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.codex",
+        "exists": false,
+        "reads": [
+          "AGENTS.md"
+        ]
+      }
+    ],
+    "project_dirs": [
+      {
+        "name": ".agents",
+        "exists": true
+      },
+      {
+        "name": ".claude",
+        "exists": false
+      },
+      {
+        "name": ".codex",
+        "exists": false
+      },
+      {
+        "name": ".zcode/config.json",
+        "exists": false
+      }
+    ],
+    "notes": []
+  },
+  "skills": {
+    "entries": [
+      {
+        "name": "report-helper",
+        "desc_len": 74,
+        "has_triggers": true,
+        "md5": "7679a98958b683374d46339b79e538bc",
+        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills\\report-helper\\SKILL.md",
+        "location": "project-agents"
+      }
+    ],
+    "duplicates": [],
+    "locations_checked": [
+      "project-agents: X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills"
+    ]
+  },
+  "context_budget": [
+    {
+      "root": ".",
+      "total_bytes": 284,
+      "over": false
+    }
+  ],
+  "chain_budget_over": false,
+  "findings": [
+    {
+      "fp": "6521c20e1e7a",
+      "section": "junk",
+      "path": "incoming\\temp-notes.md"
+    }
+  ],
+  "rules_version": "0.4.0",
+  "junk": {
+    "files": [
+      {
+        "path": "incoming\\temp-notes.md",
+        "reason": "temp file",
+        "size_bytes": 46
+      }
+    ],
+    "dirs": [],
+    "empty_dirs": []
+  },
+  "duplicates": [],
+  "large_files": [],
+  "secrets": [],
+  "gates": [
+    {
+      "schema_version": "1.0",
+      "gid": "G1",
+      "n": 1,
+      "name": "Workspace structure",
+      "description": "Workspace layout sanity: one instruction source per level, no unexpected nesting, no conflicting agent environments.",
+      "checks": [
+        {
+          "rule": "drifted-config-pairs",
+          "status": "pass"
+        },
+        {
+          "rule": "nested-repos",
+          "status": "pass"
+        },
+        {
+          "rule": "harness-env-conflict",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no drifted AGENTS.md/CLAUDE.md pairs, no nested repositories, project directories match the harnesses in use",
+      "fail_when": "an AGENTS.md/CLAUDE.md pair at one level is neither identical nor a pointer",
+      "warn_when": "a repository is nested inside another repository; project directories exist for several harnesses while at most one is active",
+      "status": "pass",
+      "evidence": [
+        "drifted config pairs: 0",
+        "nested repositories: 0",
+        "harness dirs present: 1, active among them: 1"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Fix the layout: one instruction source per level, no nested repositories, project dirs only for harnesses in use.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G2",
+      "n": 2,
+      "name": "Configuration integrity",
+      "description": "Configuration files parse and have no duplicate keys.",
+      "checks": [
+        {
+          "rule": "config-parse",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "every configuration file parses and each key occurs once",
+      "fail_when": "a configuration file has a syntax error or duplicate keys",
+      "warn_when": "no configuration files were found at all",
+      "status": "warn",
+      "evidence": [
+        "no configuration files found"
+      ],
+      "confidence": 0.9,
+      "recommendation": "Fix or remove broken config files; keep one key per setting.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G3",
+      "n": 3,
+      "name": "Rules consistency",
+      "description": "Instruction files resolve, agree and stay within budgets.",
+      "checks": [
+        {
+          "rule": "dead-references",
+          "status": "pass"
+        },
+        {
+          "rule": "generic-markers",
+          "status": "pass"
+        },
+        {
+          "rule": "instruction-size",
+          "status": "pass"
+        },
+        {
+          "rule": "pair-drift",
+          "status": "pass"
+        },
+        {
+          "rule": "chain-budget",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no dead references, no drifted pairs, no boilerplate, files within the 16 KB benchmark and the 32768-byte chain budget",
+      "fail_when": "dead links, paths or commands; a drifted AGENTS.md/CLAUDE.md pair",
+      "warn_when": "generic boilerplate in auto-loaded context; an instruction file over 16 KB; the AGENTS.md chain over 32768 bytes",
+      "status": "pass",
+      "evidence": [
+        "instruction files checked: 2, dead references: 0",
+        "generic markers: 0",
+        "instruction files over benchmark: 0",
+        "drifted pairs: 0",
+        "AGENTS.md chains within 32768 bytes"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Repair dead references, merge drifted pairs, replace boilerplate with project-specific rules.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G4",
+      "n": 4,
+      "name": "Directory ownership and discoverability",
+      "description": "Every directory has a decided fate; valuable data sits under version control.",
+      "checks": [
+        {
+          "rule": "heavy-outside-git",
+          "status": "pass"
+        },
+        {
+          "rule": "unowned-top-dirs",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no heavy data directories outside git, no loose top-level folders",
+      "fail_when": "a heavy non-build directory sits outside every git repository",
+      "warn_when": "other top-level folders outside version control",
+      "status": "warn",
+      "evidence": [
+        "heavy dirs outside git: 0",
+        "top-level dirs outside git: 4"
+      ],
+      "confidence": 0.9,
+      "recommendation": "Give every folder a fate: version control, archive or deletion.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G5",
+      "n": 5,
+      "name": "Skills and agent capabilities",
+      "description": "Skills have valid frontmatter, usable descriptions and synced copies.",
+      "checks": [
+        {
+          "rule": "frontmatter",
+          "status": "pass"
+        },
+        {
+          "rule": "description-length",
+          "status": "pass"
+        },
+        {
+          "rule": "triggers",
+          "status": "pass"
+        },
+        {
+          "rule": "skill-dead-refs",
+          "status": "pass"
+        },
+        {
+          "rule": "duplicate-copies",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "frontmatter parses with the required fields, descriptions are under 1024 chars with triggers, copies are identical, references resolve",
+      "fail_when": "missing name or description, unparseable frontmatter, a description over 1024 chars, diverged copies of one skill",
+      "warn_when": "no trigger phrase in a description; a skill references a missing file; frontmatter parsed with the fallback parser (unknown)",
+      "status": "pass",
+      "evidence": [
+        "skills checked: 1, frontmatter failures: 0, unverified: 0",
+        "descriptions over 1024 chars: 0",
+        "skills without triggers: 0",
+        "dead skill references: 0",
+        "skill name collisions: 0, diverged: 0"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Repair skill frontmatter, shorten descriptions, sync or remove diverged copies.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G6",
+      "n": 6,
+      "name": "Secrets and Git security",
+      "description": "No secrets in files, index or remote URLs; a secret scan guards commits.",
+      "checks": [
+        {
+          "rule": "exposed-secrets",
+          "status": "pass"
+        },
+        {
+          "rule": "tracked-secrets",
+          "status": "pass"
+        },
+        {
+          "rule": "secret-prevention",
+          "status": "warn"
+        }
+      ],
+      "pass_when": "no secrets in worktree files, git index or remote URLs, and a pre-commit/pre-push hook runs a secret scan",
+      "fail_when": "an exposed, staged or tracked secret; credentials in a remote URL",
+      "warn_when": "no secret-prevention mechanism exists (absence of prevention is never a pass)",
+      "status": "warn",
+      "evidence": [
+        "secrets found in workspace files: 0",
+        "secret hits in git (index, remote URLs): 0",
+        "secret scan hooks found: 0 (repositories scanned: 1)"
+      ],
+      "confidence": 0.85,
+      "recommendation": "Rotate exposed secrets, remove them from files and history, add a pre-commit secret scan.",
+      "doc_ref": "README.md#security-model"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G7",
+      "n": 7,
+      "name": "Git hygiene",
+      "description": "Repositories are clean, ignored properly and free of oversized files.",
+      "checks": [
+        {
+          "rule": "worktree-clean",
+          "status": "pass"
+        },
+        {
+          "rule": "gitignore-present",
+          "status": "pass"
+        },
+        {
+          "rule": "tracked-big-files",
+          "status": "pass"
+        },
+        {
+          "rule": "single-checkout",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "clean worktrees, .gitignore present, no tracked file over 5 MB, one checkout per remote",
+      "fail_when": "a tracked file over 5 MB",
+      "warn_when": "uncommitted or untracked work; a repo without .gitignore; several checkouts of one remote",
+      "status": "pass",
+      "evidence": [
+        "repos with uncommitted work: 0 of 1",
+        "repos without .gitignore: 0",
+        "tracked files over 5 MB: 0",
+        "remotes with several checkouts: 0"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Commit or stash local work, add .gitignore, move big files out of git, keep one checkout per remote.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G8",
+      "n": 8,
+      "name": "Agent environment governance",
+      "description": "One owner per rule; no instructions for dead harnesses; clean MCP config.",
+      "checks": [
+        {
+          "rule": "dead-harness-instructions",
+          "status": "pass"
+        },
+        {
+          "rule": "drift-ownership",
+          "status": "pass"
+        },
+        {
+          "rule": "mcp-duplicate-keys",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no dead-harness instructions, drifted pairs owned by G1/G3 (cross-referenced here), no duplicate keys in MCP configs",
+      "fail_when": "instructions maintained for a dead harness; duplicate keys in an MCP configuration",
+      "warn_when": "nothing (cross-references are informational)",
+      "status": "pass",
+      "evidence": [
+        "governance notes: 0",
+        "drifted pairs: 0",
+        "MCP configs with duplicate keys: 0"
+      ],
+      "confidence": 0.95,
+      "recommendation": "Retire instructions for dead harnesses; keep one owner per rule and one key per MCP server.",
+      "doc_ref": "README.md#the-nine-gates"
+    },
+    {
+      "schema_version": "1.0",
+      "gid": "G9",
+      "n": 9,
+      "name": "Workspace health and maintainability",
+      "description": "Junk, build artifacts and oversized files stay within healthy limits.",
+      "checks": [
+        {
+          "rule": "classified-junk",
+          "status": "warn"
+        },
+        {
+          "rule": "junk-volume",
+          "status": "pass"
+        },
+        {
+          "rule": "empty-dirs",
+          "status": "pass"
+        },
+        {
+          "rule": "occasional-harness",
+          "status": "pass"
+        },
+        {
+          "rule": "large-untracked-files",
+          "status": "pass"
+        }
+      ],
+      "pass_when": "no classified junk, total junk+build under 500 MB, few empty dirs, no occasional harnesses, no large files outside git",
+      "fail_when": "junk and build artifacts together exceed 500 MB",
+      "warn_when": "confirmed or potentially unused junk; more than 10 empty dirs; an occasional harness; a file over 5 MB outside git",
+      "status": "warn",
+      "evidence": [
+        "classified junk items: 1",
+        "junk+build total: 0 MB across 1 files and 0 dirs",
+        "empty dirs: 0",
+        "occasional harnesses: 0",
+        "large files outside git: 0"
+      ],
+      "confidence": 0.5,
+      "recommendation": "Delete or archive junk, watch the total size, keep occasional harnesses as a deliberate choice.",
+      "doc_ref": "README.md#limits-and-thresholds"
+    }
+  ],
+  "stats": {
+    "total_files": 9,
+    "total_size_bytes": 929,
+    "skipped_symlinks_outside": 0,
+    "duration_sec": 0.19
+  },
+  "config_integrity": [],
+  "heavy_outside_git": [],
+  "junk_classified": [
+    {
+      "path": "incoming\\temp-notes.md",
+      "reason": "temp file",
+      "size_bytes": 46,
+      "tracked": false,
+      "age_days": 0,
+      "referenced": false,
+      "confidence": 0.5,
+      "cls": "potentially_unused",
+      "signals": {
+        "tracked": false,
+        "age_days": 0,
+        "referenced": false
+      }
+    }
+  ],
+  "skills_extra": {
+    "report-helper": {
+      "frontmatter_ok": true,
+      "missing_fields": [],
+      "dead_refs": [],
+      "parser": "yaml"
+    }
+  },
+  "findings_detailed": [
+    {
+      "schema_version": "1.0",
+      "fid": "CFG-001",
+      "gate": "G2",
+      "category": "config",
+      "severity": "info",
+      "status": "warn",
+      "title": "No configuration files found",
+      "description": "The scanner found no configuration files to parse. Absence of data is not a pass: nobody confirmed the workspace really has no configs.",
+      "evidence": [
+        {
+          "detail": "no configuration files found"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "If the workspace should have configs (MCP, harness settings), find out why none were discovered.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "DIR-001",
+      "gate": "G4",
+      "category": "dirs",
+      "severity": "low",
+      "status": "warn",
+      "title": "4 top-level folders outside version control",
+      "description": "These folders are not git repositories; their content has no history and no backup.",
+      "evidence": [
+        {
+          "path": ".agents",
+          "size": "0 KB"
+        },
+        {
+          "path": "docs",
+          "size": "0 KB"
+        },
+        {
+          "path": "incoming",
+          "size": "0 KB"
+        },
+        {
+          "path": "reports",
+          "size": "0 KB"
+        }
+      ],
+      "confidence": 0.9,
+      "recommendation": "Decide for each folder: make it a repo, move it into one, or remove it.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "SEC-001",
+      "gate": "G6",
+      "category": "secrets",
+      "severity": "medium",
+      "status": "warn",
+      "title": "No secret-prevention mechanism found",
+      "description": "No pre-commit/pre-push hook runs a secret scan in any of the 1 repositories. A .gitignore alone is not proof: coverage of .env, .mcp.json is not derivable from the collected facts, so absence of a hook is treated as no prevention.",
+      "evidence": [
+        {
+          "detail": "no pre-commit/pre-push hook with secret scan in any repository",
+          "repositories scanned": 1
+        }
+      ],
+      "confidence": 0.85,
+      "recommendation": "Install a pre-commit secret scan (gitleaks or equivalent) in every active repository.",
+      "autofix_available": false
+    },
+    {
+      "schema_version": "1.0",
+      "fid": "HLTH-001",
+      "gate": "G9",
+      "category": "health",
+      "severity": "low",
+      "status": "warn",
+      "title": "Unused data (potentially_unused): incoming\\temp-notes.md",
+      "description": "Classified as potentially_unused (confidence 0.5): temp file.",
+      "evidence": [
+        {
+          "path": "incoming\\temp-notes.md",
+          "reason": "temp file",
+          "size": "0 KB",
+          "class": "potentially_unused"
+        }
+      ],
+      "confidence": 0.5,
+      "recommendation": "Review, then archive or delete.",
+      "autofix_available": false
+    }
+  ]
+}
