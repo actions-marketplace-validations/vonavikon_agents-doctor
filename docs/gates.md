@@ -1,6 +1,6 @@
 # Gates methodology
 
-The gate engine (`skills/workspace-audit/scripts/gates.py`) turns scanner
+The gate engine (`skills/agents-doctor/scripts/gates.py`) turns scanner
 facts into nine gates and typed findings. Definitions are declarative
 (`GATE_DEFS`); thresholds live in one dict (`GATE_POLICY`) imported by the
 scanner and the tests. A gate's status is the worst status among its

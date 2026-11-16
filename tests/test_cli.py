@@ -1,4 +1,4 @@
-"""Stage-4 tests: workspace_audit.py CLI (audit / compare / explain / fix).
+"""Stage-4 tests: agents_doctor.py CLI (audit / compare / explain / fix).
 
 The fixture is a tiny workspace: one git repository whose AGENTS.md has
 a dead link, one empty directory and no .gitignore, plus an empty home.
@@ -18,10 +18,10 @@ from io import StringIO
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = REPO_ROOT / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = REPO_ROOT / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
-import workspace_audit as cli  # noqa: E402
+import agents_doctor as cli  # noqa: E402
 
 AGENTS_MD = ('# Project rules\n'
              '\n'
@@ -174,7 +174,7 @@ class FixCommand(CliCase):
         # nothing changed on disk
         self.assertFalse((self.repo / '.gitignore').exists())
         self.assertTrue((self.repo / 'empty').exists())
-        self.assertFalse((self.ws / '.workspace-audit-trash').exists())
+        self.assertFalse((self.ws / '.agents-doctor-trash').exists())
 
 
 class ReportFlag(CliCase):

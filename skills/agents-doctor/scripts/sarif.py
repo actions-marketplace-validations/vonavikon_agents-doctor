@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export a scan.json report as SARIF 2.1.0 for code-scanning tools.
 
-    python skills/workspace-audit/scripts/sarif.py <scan.json> --out report.sarif
+    python skills/agents-doctor/scripts/sarif.py <scan.json> --out report.sarif
 
 One rule per gate (G1..G9), one result per finding whose status is fail
 or warn. Locations are logical: the evidence file or path, falling back
@@ -16,8 +16,8 @@ from pathlib import Path
 
 SARIF_VERSION = '2.1.0'
 SARIF_SCHEMA = 'https://json.schemastore.org/sarif-2.1.0.json'
-TOOL_NAME = 'workspace-audit'
-TOOL_URI = 'https://github.com/vonavikon/workspace-audit'
+TOOL_NAME = 'agents-doctor'
+TOOL_URI = 'https://github.com/vonavikon/agents-doctor'
 GATES_HELP_URI = TOOL_URI + '#the-nine-gates'
 FINGERPRINT_KEY = 'workspaceAudit/v1'
 

@@ -30,7 +30,7 @@ the human part.
 
 6. Commit the version bump, then tag: `git tag vX.Y.Z && git push origin
    main vX.Y.Z`. The `release` job (needs lint, tests, coverage, validate,
-   benchmark) reruns the suite, packages `workspace-audit-<ver>.zip`
+   benchmark) reruns the suite, packages `agents-doctor-<ver>.zip`
    (plugin files only) and creates the GitHub release with generated
    notes. Watch it finish on the Actions page.
 
@@ -39,8 +39,8 @@ the human part.
 7. Verify the marketplace install exactly as a user would:
 
    ```
-   /plugin marketplace add vonavikon/workspace-audit
-   /plugin install workspace-audit@workspace-audit
+   /plugin marketplace add vonavikon/agents-doctor
+   /plugin install agents-doctor@agents-doctor
    ```
 
    Then run an audit in a scratch folder and check the report renders.

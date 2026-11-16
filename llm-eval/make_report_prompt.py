@@ -4,7 +4,7 @@
     python llm-eval/make_report_prompt.py --scan llm-eval/fixtures/chaos.json --out prompt.txt
 
 The prompt is deterministic: the workflow and rules sections of
-skills/workspace-audit/SKILL.md (report structure, gates table first, masked
+skills/agents-doctor/SKILL.md (report structure, gates table first, masked
 secrets, false-positive filtering) followed by the full scan JSON in a fenced
 block and the instruction 'Write the AUDIT report now.'. The same scan and
 SKILL.md always produce byte-identical output, so prompt, model reply and
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-DEFAULT_SKILL = REPO / 'skills' / 'workspace-audit' / 'SKILL.md'
+DEFAULT_SKILL = REPO / 'skills' / 'agents-doctor' / 'SKILL.md'
 
 RAW_TOKEN_RX = re.compile(r'sk-[A-Za-z0-9_-]{16,}')
 
@@ -58,10 +58,10 @@ def build_prompt(scan_json_path, skill_md_path):
     rules = _section(skill_text, 'Rules')
 
     prompt = (
-        'You are the agent running the workspace-audit skill. The scanner already\n'
+        'You are the agent running the agents-doctor skill. The scanner already\n'
         'ran; the scan JSON below is its complete output.\n'
         '\n'
-        '## Skill instructions (from skills/workspace-audit/SKILL.md)\n'
+        '## Skill instructions (from skills/agents-doctor/SKILL.md)\n'
         '\n'
         '### Workflow\n'
         '\n'

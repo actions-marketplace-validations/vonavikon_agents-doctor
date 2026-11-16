@@ -13,8 +13,8 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPTS = REPO / 'skills' / 'workspace-audit' / 'scripts'
-ENTRY_POINTS = ['audit_scan.py', 'workspace_audit.py', 'report_generator.py',
+SCRIPTS = REPO / 'skills' / 'agents-doctor' / 'scripts'
+ENTRY_POINTS = ['audit_scan.py', 'agents_doctor.py', 'report_generator.py',
                 'report_human.py', 'sarif.py', 'safe_clean.py',
                 'remediate.py', 'secret_scanner.py', 'fingerprint.py']
 
@@ -35,7 +35,7 @@ class RuntimePathsTest(unittest.TestCase):
         self.addCleanup(_force_rmtree, self.base)
         # a fake "installed" plugin location, far from the repo layout
         self.installed = self.base / 'plugins' / 'cache' / 'market' / 'wa-9'
-        dst = self.installed / 'skills' / 'workspace-audit' / 'scripts'
+        dst = self.installed / 'skills' / 'agents-doctor' / 'scripts'
         dst.parent.mkdir(parents=True)
         shutil.copytree(SCRIPTS, dst)
         self.cwd = self.base / 'unrelated' / 'current' / 'dir'
@@ -43,7 +43,7 @@ class RuntimePathsTest(unittest.TestCase):
 
     def _run(self, script, *args, timeout=120):
         proc = subprocess.run(
-            [sys.executable, str(self.installed / 'skills' / 'workspace-audit'
+            [sys.executable, str(self.installed / 'skills' / 'agents-doctor'
                                  / 'scripts' / script), *args],
             capture_output=True, text=True, encoding='utf-8',
             errors='replace', cwd=self.cwd, timeout=timeout)
@@ -69,18 +69,18 @@ class RuntimePathsTest(unittest.TestCase):
         self.assertTrue(out.exists())
         report = self.base / 'AUDIT.md'
         self._run('report_generator.py', str(out), '--out', str(report))
-        self.assertIn('Workspace Audit', report.read_text(encoding='utf-8')[:400])
+        self.assertIn('Agents Doctor', report.read_text(encoding='utf-8')[:400])
 
     def test_skill_doc_has_no_cwd_dependent_command(self):
-        text = (REPO / 'skills' / 'workspace-audit' / 'SKILL.md').read_text(
+        text = (REPO / 'skills' / 'agents-doctor' / 'SKILL.md').read_text(
             encoding='utf-8')
         self.assertNotIn('`python scripts/audit_scan.py', text)
 
     def test_commands_use_plugin_root(self):
-        text = (REPO / 'commands' / 'workspace-audit.md').read_text(
+        text = (REPO / 'commands' / 'agents-doctor.md').read_text(
             encoding='utf-8')
         self.assertIn('${CLAUDE_PLUGIN_ROOT}', text)
-        self.assertNotIn('python skills/workspace-audit/scripts/', text)
+        self.assertNotIn('python skills/agents-doctor/scripts/', text)
 
 
 if __name__ == '__main__':

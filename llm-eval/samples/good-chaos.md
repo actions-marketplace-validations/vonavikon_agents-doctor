@@ -1,6 +1,6 @@
-# Workspace audit - AUDIT-2026-11-16
+# Agents doctor - AUDIT-2026-11-16
 
-Scanned root: X:\Repos\workspace-audit\qa\scenarios\03-leaver-chaos\run\workspace
+Scanned root: X:\Repos\agents-doctor\qa\scenarios\03-leaver-chaos\run\workspace
 (frozen chaos fixture, DEMO content). Read-only audit: nothing was modified.
 
 ## Gates
@@ -73,5 +73,5 @@ This audit changed nothing. Re-run it yourself after cleanup and compare:
 ```
 git -C legacy-crm stash list
 git -C legacy-crm rm --cached config.py
-python skills/workspace-audit/scripts/audit_scan.py . --out re-scan.json
+python skills/agents-doctor/scripts/audit_scan.py . --out re-scan.json
 ```

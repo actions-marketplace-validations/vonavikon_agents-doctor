@@ -9,7 +9,7 @@ applied, what was deliberately not applied, and the sources.
 | Finding (source) | Where it landed |
 |---|---|
 | Preview before delete is the primary action, deletion the second explicit step (BleachBit, `git clean -n`, docker prune) | `safe_clean.py` flow: plan → plain-word preview → typed `YES` |
-| Prefer undo over confirmation; trash-first everywhere (NN/g User Control & Freedom; Send2Trash practice) | everything movable goes to `.workspace-audit-trash/<timestamp>/`, nothing is deleted in place; only truly-empty dirs are `rmdir`'d |
+| Prefer undo over confirmation; trash-first everywhere (NN/g User Control & Freedom; Send2Trash practice) | everything movable goes to `.agents-doctor-trash/<timestamp>/`, nothing is deleted in place; only truly-empty dirs are `rmdir`'d |
 | Categorize by risk; auto-clean only the top tier (CleanMyMac Safety Database model) | default-safe tier (caches, empty dirs, confirmed junk) vs cautious tier behind `--include-cautious` |
 | Whitelist-only deletion; ecosystem-documented regenerables only (gitignore templates, `cargo clean`) | `BUILD_DIR_SAFE` + cautious remainder of the scanner's build dirs |
 | A lockfile is what makes `node_modules` reliably regenerable; patched/vendored content is lost otherwise (patch-package exists for this) | node_modules without a sibling lockfile drops to the cautious tier |

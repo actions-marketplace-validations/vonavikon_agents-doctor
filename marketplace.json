@@ -1,11 +1,13 @@
 {
-  "name": "workspace-audit",
-  "owner": { "name": "vonavikon" },
+  "name": "agents-doctor",
+  "owner": {
+    "name": "vonavikon"
+  },
   "plugins": [
     {
-      "name": "workspace-audit",
+      "name": "agents-doctor",
       "source": "./",
-      "description": "Agent workspace audit: deterministic scanner plus a skill-generated gated report.",
+      "description": "Doctor for AI agent workspaces: AGENTS.md health, secrets, cleanup, SARIF.",
       "version": "0.7.0"
     }
   ]

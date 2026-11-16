@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "root": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace",
-  "home": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home",
+  "root": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\workspace",
+  "home": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\home",
   "generated_at": "2026-11-16T16:21:26+03:00",
   "top_level": [
     {
@@ -84,17 +84,17 @@
     "session_files": [
       {
         "role": "user-zcode",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\AGENTS.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\AGENTS.md",
         "size_bytes": 117
       },
       {
         "role": "project",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\AGENTS.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\AGENTS.md",
         "size_bytes": 284
       },
       {
         "role": "memory-index",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
         "size_bytes": 3478
       }
     ],
@@ -119,7 +119,7 @@
       },
       {
         "tool": "claude",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.claude",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\home\\.claude",
         "exists": false,
         "reads": [
           "CLAUDE.md",
@@ -128,7 +128,7 @@
       },
       {
         "tool": "codex",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\home\\.codex",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\home\\.codex",
         "exists": false,
         "reads": [
           "AGENTS.md"
@@ -162,13 +162,13 @@
         "desc_len": 74,
         "has_triggers": true,
         "md5": "7679a98958b683374d46339b79e538bc",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills\\report-helper\\SKILL.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills\\report-helper\\SKILL.md",
         "location": "project-agents"
       }
     ],
     "duplicates": [],
     "locations_checked": [
-      "project-agents: X:\\Repos\\workspace-audit\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills"
+      "project-agents: X:\\Repos\\agents-doctor\\qa\\scenarios\\01-clean-newbie\\run\\workspace\\.agents\\skills"
     ]
   },
   "context_budget": [

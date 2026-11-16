@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/secret_rules.py.
+"""Tests for skills/agents-doctor/scripts/secret_rules.py.
 
 Parity: for every PARITY_CORPUS line find_rule(line) must match the
 expected id, and for positives find_rule_ere(line) must pick the same
@@ -11,7 +11,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'))
 
 import secret_rules
 import secret_scanner

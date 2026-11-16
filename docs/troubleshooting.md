@@ -79,5 +79,5 @@ with canaries on every commit; your run reproduces it locally.
 - Deleting a cloned repo. `git` marks objects read-only, so a plain
   `rmtree` of a `.git` directory can fail. The QA runner chmods files
   before removing; when you clean up manually, use an erase that clears
-  the read-only bit (for example `rm -rf` in Git Bash, or the `.workspace-audit-trash/`
+  the read-only bit (for example `rm -rf` in Git Bash, or the `.agents-doctor-trash/`
   convention of `remediate.py`, which handles this).

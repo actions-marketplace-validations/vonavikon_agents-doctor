@@ -1,4 +1,4 @@
-"""Coverage tests for skills/workspace-audit/scripts/workspace_audit.py.
+"""Coverage tests for skills/agents-doctor/scripts/agents_doctor.py.
 
 Targets the CLI branches the main suite leaves uncovered: error
 returns (bad root, unwritable out, unreadable JSON, scan without a
@@ -24,11 +24,11 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = REPO_ROOT / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = REPO_ROOT / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import remediate  # noqa: E402
-import workspace_audit as cli  # noqa: E402
+import agents_doctor as cli  # noqa: E402
 
 AGENTS_MD = ('# Project rules\n'
              '\n'
@@ -73,8 +73,8 @@ class CliCase(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix='wsa-covcli-'))
         self.addCleanup(force_rmtree, self.base)
-        os.environ['WORKSPACE_AUDIT_KEY_PATH'] = str(self.base / 'fp_key')
-        self.addCleanup(os.environ.pop, 'WORKSPACE_AUDIT_KEY_PATH', None)
+        os.environ['AGENTS_DOCTOR_KEY_PATH'] = str(self.base / 'fp_key')
+        self.addCleanup(os.environ.pop, 'AGENTS_DOCTOR_KEY_PATH', None)
         self.ws, self.home, self.repo = build_workspace(self.base)
 
     def run_cli(self, argv):

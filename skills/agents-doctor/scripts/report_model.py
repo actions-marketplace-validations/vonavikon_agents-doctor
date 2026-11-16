@@ -1,4 +1,4 @@
-"""Unified finding and gate model for workspace-audit reports.
+"""Unified finding and gate model for agents-doctor reports.
 
 Findings and gates share one schema so the JSON report, the baseline diff
 and the skill layer all speak the same language. The module has no

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCANNER = REPO / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = REPO / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 SCENARIOS = [('01-clean-newbie', 'clean'), ('03-leaver-chaos', 'chaos')]
 
 

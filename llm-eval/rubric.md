@@ -2,7 +2,7 @@
 
 The model under test receives a frozen scan JSON (`llm-eval/fixtures/clean.json`
 or `chaos.json`, or one of the adversarial fixtures) inside the prompt built
-from `skills/workspace-audit/SKILL.md`, and writes `AUDIT-<date>.md`.
+from `skills/agents-doctor/SKILL.md`, and writes `AUDIT-<date>.md`.
 Grade every criterion PASS or FAIL and quote the report line that decided it.
 
 R1-R4 and RX are automated by `llm-eval/grade_report.py`. R5-R7 are automated

@@ -15,7 +15,7 @@ fallback runs otherwise).
 
 ## CLI flags
 
-Scanner (`skills/workspace-audit/scripts/audit_scan.py`):
+Scanner (`skills/agents-doctor/scripts/audit_scan.py`):
 
 | Flag | Effect |
 |---|---|
@@ -25,7 +25,7 @@ Scanner (`skills/workspace-audit/scripts/audit_scan.py`):
 | `--baseline <scan.json>` | Previous report; adds a `diff` section with new and resolved fingerprinted findings. An unreadable baseline is skipped silently. |
 | `--out <file>` | Report path. Default `scan.json`. This is the only file the scanner writes. |
 
-Stage-4 CLI entry (`skills/workspace-audit/scripts/workspace_audit.py`):
+Stage-4 CLI entry (`skills/agents-doctor/scripts/agents_doctor.py`):
 
 | Subcommand | Flags | Effect |
 |---|---|---|
@@ -41,7 +41,7 @@ See [cli.md](cli.md) for examples.
 ## Thresholds
 
 All thresholds are constants in code, not options. The gates read them
-from `GATE_POLICY` in `skills/workspace-audit/scripts/gates.py`:
+from `GATE_POLICY` in `skills/agents-doctor/scripts/gates.py`:
 
 | Constant | Value |
 |---|---|
@@ -80,7 +80,7 @@ report says so.
 ## Trash convention
 
 Remediation (`remediate.py --apply`) never deletes. Files it removes from
-the workspace are moved into `.workspace-audit-trash/` under the audited
+the workspace are moved into `.agents-doctor-trash/` under the audited
 root, one subdirectory per remediation run. Delete the trash yourself
 after checking it; the scanner reports it as a normal directory on the
 next run.

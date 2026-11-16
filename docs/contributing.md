@@ -25,8 +25,8 @@ Windows without Developer Mode).
 
 | Path | Content |
 |---|---|
-| `skills/workspace-audit/SKILL.md` | The skill: workflow and interpretation rules for the agent. |
-| `skills/workspace-audit/scripts/` | Scanner modules: `audit_scan.py`, `secret_scanner.py`, `enrich.py`, `gates.py`, `report_model.py` and the stage-4 modules (`report_generator.py`, `sarif.py`, `workspace_audit.py`, `remediate.py`). |
+| `skills/agents-doctor/SKILL.md` | The skill: workflow and interpretation rules for the agent. |
+| `skills/agents-doctor/scripts/` | Scanner modules: `audit_scan.py`, `secret_scanner.py`, `enrich.py`, `gates.py`, `report_model.py` and the stage-4 modules (`report_generator.py`, `sarif.py`, `agents_doctor.py`, `remediate.py`). |
 | `tests/` | Unit, integration (`tests/integration/`) and security-regression suites. |
 | `qa/` | Scenario eval: fixtures with expectations locked before the run. |
 | `bench/` | Synthetic workspace generator and benchmark runner. |

@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/sarif.py.
+"""Tests for skills/agents-doctor/scripts/sarif.py.
 
 Exports the chaos fixture and synthetic findings to SARIF 2.1.0: rule
 coverage, result filtering, level mapping, fingerprints, JSON
@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(REPO / 'skills' / 'agents-doctor' / 'scripts'))
 
 import sarif
 
@@ -50,14 +50,14 @@ class ChaosSarifTest(unittest.TestCase):
             self.assertIn('shortDescription', rule)
             self.assertIn('fullDescription', rule)
             self.assertEqual(rule['helpUri'],
-                             'https://github.com/vonavikon/workspace-audit'
+                             'https://github.com/vonavikon/agents-doctor'
                              '#the-nine-gates')
 
     def test_driver_identity(self):
-        self.assertEqual(self.driver['name'], 'workspace-audit')
+        self.assertEqual(self.driver['name'], 'agents-doctor')
         self.assertEqual(self.driver['version'], self.rep['rules_version'])
         self.assertEqual(self.driver['informationUri'],
-                         'https://github.com/vonavikon/workspace-audit')
+                         'https://github.com/vonavikon/agents-doctor')
 
     def test_results_match_fail_warn_findings(self):
         expected = [f for f in self.rep['findings_detailed']
@@ -154,7 +154,7 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'report.sarif'
             r = subprocess.run(
-                [sys.executable, str(REPO / 'skills' / 'workspace-audit' /
+                [sys.executable, str(REPO / 'skills' / 'agents-doctor' /
                                      'scripts' / 'sarif.py'),
                  str(CHAOS), '--out', str(out)],
                 capture_output=True, text=True, cwd=str(REPO))

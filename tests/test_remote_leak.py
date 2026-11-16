@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCANNER = REPO / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = REPO / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 
 CANARY_BASIC = 'CANARY-REMpw-zz91'
 CANARY_QUERY = 'CANARY-REMquery-77aa'

@@ -2,7 +2,7 @@
 
 ## Two layers
 
-workspace-audit splits the job in two:
+agents-doctor splits the job in two:
 
 1. A deterministic scanner. Pure Python stdlib, no dependencies, offline.
    It walks the workspace, collects facts and writes JSON. Runs are
@@ -18,7 +18,7 @@ locks expected results and compares the scanner's actual JSON against them.
 
 ## Module map
 
-All scanner modules live in `skills/workspace-audit/scripts/`:
+All scanner modules live in `skills/agents-doctor/scripts/`:
 
 | Module | Role |
 |---|---|
@@ -29,8 +29,8 @@ All scanner modules live in `skills/workspace-audit/scripts/`:
 | `report_model.py` | The finding/gate data model (schema 1.0). Validates severity, status, evidence, confidence; separates the severity and status axes. |
 | `report_generator.py` | Stage 4. Writes the markdown report (`AUDIT-<date>.md`) from a scan JSON. |
 | `sarif.py` | Stage 4. Exports findings as SARIF 2.1.0 for CI code viewers. |
-| `workspace_audit.py` | Stage 4. CLI entry with `audit` (incl. `--focus`), `compare`, `explain`, `fix` subcommands. |
-| `remediate.py` | Stage 4. Remediation planner. Plan-only by default; `--apply` moves files to `.workspace-audit-trash/` instead of deleting. |
+| `agents_doctor.py` | Stage 4. CLI entry with `audit` (incl. `--focus`), `compare`, `explain`, `fix` subcommands. |
+| `remediate.py` | Stage 4. Remediation planner. Plan-only by default; `--apply` moves files to `.agents-doctor-trash/` instead of deleting. |
 
 ## Data flow
 
@@ -102,4 +102,4 @@ itself refuses a `value` or `preview` key on secret entries
   skipped, not followed, and counted in `stats.skipped_symlinks_outside`.
 - The scanner writes exactly one file: the `--out` report path.
   `remediate.py` extends this only on explicit `--apply`, and moves to
-  `.workspace-audit-trash/` rather than deleting.
+  `.agents-doctor-trash/` rather than deleting.

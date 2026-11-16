@@ -1,6 +1,6 @@
 # Что нашла проверка — простыми словами
 
-Проверенная папка: X:\Repos\workspace-audit\qa\scenarios\03-leaver-chaos\run\workspace
+Проверенная папка: X:\Repos\agents-doctor\qa\scenarios\03-leaver-chaos\run\workspace
 
 ## Коротко
 

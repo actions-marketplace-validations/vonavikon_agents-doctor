@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/enrich.py (fact-enrichment, stage 2).
+"""Tests for skills/agents-doctor/scripts/enrich.py (fact-enrichment, stage 2).
 
 Covers config parse integrity, heavy dirs outside git, junk classification
 with real git fixtures, harness activity states and SKILL.md frontmatter
@@ -15,7 +15,7 @@ import time
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'))
 
 import enrich
 

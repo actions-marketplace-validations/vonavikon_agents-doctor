@@ -1,6 +1,12 @@
-# workspace-audit
+# agents-doctor
 
-Read-only workspace auditor for agent-driven setups (Claude Code, Z Code compatible). Finds stale instruction files, abandoned repos, folders outside git, junk, duplicates, secrets and drifted skills. The report stays local, there is no telemetry, and nothing is deleted.
+<p align="center">
+  <img src="docs/logo.png" alt="agents-doctor logo" width="120" height="120">
+</p>
+
+**Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Works with Claude Code, Z Code, or standalone. Read-only by default; cleanup is explicit, recoverable, and never automatic.
+
+No telemetry. No network. Your data stays on your machine.
 
 ## How it works
 
@@ -19,7 +25,7 @@ The scanner only reads. Deletions and edits always stay with the human.
 - Git runs with `GIT_OPTIONAL_LOCKS=0`: the audit cannot refresh or modify the index.
 - The scanner writes exactly one file: the report path passed via `--out`.
 - Git remote URLs are sanitized at the source: userinfo and credential query parameters never reach any artifact; detection happens on the raw value before it is dropped.
-- Fingerprints are HMAC-SHA256 with a per-installation key stored under your user config dir (never in reports, never sent to a model; `python skills/workspace-audit/scripts/fingerprint.py --check` verifies it). Older baselines will show a one-time all-new/all-resolved diff after the format change.
+- Fingerprints are HMAC-SHA256 with a per-installation key stored under your user config dir (never in reports, never sent to a model; `python skills/agents-doctor/scripts/fingerprint.py --check` verifies it). Older baselines will show a one-time all-new/all-resolved diff after the format change.
 - Deep history scanning is bounded and honest: `--history-depth N` caps it, `--history-all-refs` widens it, and an incomplete or unrequested history scan reads as `unknown`, never as a pass.
 
 ## What it checks
@@ -68,8 +74,8 @@ Everything rolls up into nine gates with four statuses: pass, warn, fail and unk
 Claude Code / Z Code:
 
 ```
-/plugin marketplace add vonavikon/workspace-audit
-/plugin install workspace-audit@workspace-audit
+/plugin marketplace add vonavikon/agents-doctor
+/plugin install agents-doctor@agents-doctor
 ```
 
 Then tell the agent "run a workspace audit" and name a folder if needed.
@@ -77,7 +83,7 @@ Then tell the agent "run a workspace audit" and name a folder if needed.
 The scanner also runs standalone, without an agent:
 
 ```
-python skills/workspace-audit/scripts/audit_scan.py <path> --home <home> --out scan.json
+python skills/agents-doctor/scripts/audit_scan.py <path> --home <home> --out scan.json
 ```
 
 Flags:
@@ -92,7 +98,7 @@ Builds a synthetic workspace with all the typical problems and runs the scanner 
 
 ```
 python demo/setup_demo.py
-python skills/workspace-audit/scripts/audit_scan.py demo/employee-workspace --home demo/fake-home --out demo-scan.json
+python skills/agents-doctor/scripts/audit_scan.py demo/employee-workspace --home demo/fake-home --out demo-scan.json
 ```
 
 All tokens and hosts in the fixtures are synthetic.
@@ -102,28 +108,28 @@ All tokens and hosts in the fixtures are synthetic.
 The skill writes `AUDIT-<date>.md`: executive summary, overall status (`FAIL` / `NEEDS ATTENTION` / `PASS`), gate results, findings by severity and recommended actions. A sample for a messy workspace: [docs/sample-report.md](docs/sample-report.md). The generators are deterministic and need no model:
 
 ```
-python skills/workspace-audit/scripts/report_generator.py <scan.json> --out AUDIT.md
-python skills/workspace-audit/scripts/sarif.py <scan.json> --out report.sarif
-python skills/workspace-audit/scripts/workspace_audit.py --help
+python skills/agents-doctor/scripts/report_generator.py <scan.json> --out AUDIT.md
+python skills/agents-doctor/scripts/sarif.py <scan.json> --out report.sarif
+python skills/agents-doctor/scripts/agents_doctor.py --help
 ```
 
-`sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `workspace_audit.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, and `fix <fid>` — plan-only by default.
+`sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `agents_doctor.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, and `fix <fid>` — plan-only by default.
 
 For non-technical readers there is a plain-language value report (English and Russian): what is wrong in human words, what it costs (extra tokens every session with the assumption printed, disk space, secrets in plain sight), and — with a second scan after cleanup — what got better. Samples: [EN](docs/sample-human-report.md), [RU](docs/sample-human-report.ru.md).
 
 ```
-python skills/workspace-audit/scripts/report_human.py <scan.json> --lang ru [--after <scan2.json>]
+python skills/agents-doctor/scripts/report_human.py <scan.json> --lang ru [--after <scan2.json>]
 ```
 
 And for people who do not want to read reports at all, the safe-cleanup wizard tidies up with near-zero risk: a plain-word preview, a typed YES, everything recoverable:
 
 ```
-python skills/workspace-audit/scripts/safe_clean.py <root>
+python skills/agents-doctor/scripts/safe_clean.py <root>
 ```
 
-It only touches regenerable caches, empty folders and confirmed junk (aged, untracked, unreferenced, lockfile-backed `node_modules` only); build dirs modified within the last 7 days are skipped as active installs; tracked files, files with keys and anything uncertain are never touched; every movable item goes to `.workspace-audit-trash/` first. Design rationale and sources: [docs/research-human-layer.md](docs/research-human-layer.md).
+It only touches regenerable caches, empty folders and confirmed junk (aged, untracked, unreferenced, lockfile-backed `node_modules` only); build dirs modified within the last 7 days are skipped as active installs; tracked files, files with keys and anything uncertain are never touched; every movable item goes to `.agents-doctor-trash/` first. Design rationale and sources: [docs/research-human-layer.md](docs/research-human-layer.md).
 
-Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix, requires an explicit `yes` before `--apply` touches anything, and re-audits afterwards. V1 supports three fix types: removing empty directories, creating a `.gitignore` from the template, and moving confirmed junk into `.workspace-audit-trash/`.
+Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix, requires an explicit `yes` before `--apply` touches anything, and re-audits afterwards. V1 supports three fix types: removing empty directories, creating a `.gitignore` from the template, and moving confirmed junk into `.agents-doctor-trash/`.
 
 ## Documentation
 

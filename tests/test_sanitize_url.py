@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/sanitize_url.py.
+"""Tests for skills/agents-doctor/scripts/sanitize_url.py.
 
 Canary CANARY-REM-cred-9f3a is planted in every credential position
 (userinfo, password, token username, query values) and in garbage
@@ -9,7 +9,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'))
 
 import sanitize_url
 

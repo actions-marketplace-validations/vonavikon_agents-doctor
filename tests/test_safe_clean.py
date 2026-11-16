@@ -20,7 +20,7 @@ from io import StringIO
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = REPO_ROOT / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = REPO_ROOT / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_scan  # noqa: E402

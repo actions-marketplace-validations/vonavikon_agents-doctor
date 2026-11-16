@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to workspace-audit are documented here. The format
+All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
@@ -79,7 +79,7 @@ The human layer: value-first reporting and safe cleanup.
   preview, typed YES, trash-first recovery, hard never-touch rules.
 - Research note `docs/research-human-layer.md` with applied/declined
   findings and sources.
-- Sample human reports (EN/RU), `/workspace-audit human` and `clean`
+- Sample human reports (EN/RU), `/agents-doctor human` and `clean`
   command routing, CLI/docs updates.
 
 ### Changed
@@ -96,10 +96,10 @@ guarded remediation. Full spec coverage complete.
 ### Added
 
 - Stage-4 modules: `report_generator.py` (markdown report from scan JSON),
-  `sarif.py` (SARIF 2.1.0 export), `workspace_audit.py` (CLI entry with
+  `sarif.py` (SARIF 2.1.0 export), `agents_doctor.py` (CLI entry with
   `audit --focus/--report`, `compare`, `explain`, `fix`), `remediate.py`
-  (plan-only remediation; `--apply` moves to `.workspace-audit-trash/`).
-- Plugin command `/workspace-audit` with focused, compare, explain and fix
+  (plan-only remediation; `--apply` moves to `.agents-doctor-trash/`).
+- Plugin command `/agents-doctor` with focused, compare, explain and fix
   modes.
 - Documentation package: quickstart, architecture, gates methodology,
   configuration, CLI reference, troubleshooting, contributing.

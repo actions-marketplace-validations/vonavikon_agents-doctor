@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/report_human.py.
+"""Tests for skills/agents-doctor/scripts/report_human.py.
 
 Runs the plain-language generator over the chaos and clean fixtures:
 token math sanity, bilingual section structure, the before/after story,
@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(REPO / 'skills' / 'agents-doctor' / 'scripts'))
 
 import report_human  # noqa: E402
 

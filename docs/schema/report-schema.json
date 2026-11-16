@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "workspace-audit report (plugin 0.4.x, report schema_version 1.0)",
-  "description": "Shape of scan.json produced by skills/workspace-audit/scripts/audit_scan.py. Pragmatic: unknown top-level keys are allowed (additionalProperties stays true) so enrich stages can add facts without a schema bump. Secret values are never modeled: secrets carry path/kind/mask/fingerprint only, and additionalProperties is false there so a 'value' or 'preview' key carrying raw material cannot validate.",
+  "title": "agents-doctor report (plugin 0.4.x, report schema_version 1.0)",
+  "description": "Shape of scan.json produced by skills/agents-doctor/scripts/audit_scan.py. Pragmatic: unknown top-level keys are allowed (additionalProperties stays true) so enrich stages can add facts without a schema bump. Secret values are never modeled: secrets carry path/kind/mask/fingerprint only, and additionalProperties is false there so a 'value' or 'preview' key carrying raw material cannot validate.",
   "type": "object",
   "required": [
     "schema_version",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guided safe-cleanup wizard for workspace-audit.
+"""Guided safe-cleanup wizard for agents-doctor.
 
 remediate.py fixes one finding at a time; this tool is the other end of
 the scale: a wizard for non-technical users that tidies a whole
@@ -32,7 +32,7 @@ workspace root, paths with '..' after normalization, single items over
 the size cap (500 MB hard ceiling; --max-bytes can lower it, never
 raise it), and the trash folder itself.
 
-Everything deletable goes to <root>/.workspace-audit-trash/
+Everything deletable goes to <root>/.agents-doctor-trash/
 <YYYYmmdd-HHMMSS>-<opid>/<relative-path> first, via shutil.move (see
 trashops.py: per-run operation id, write-ahead manifest.json, crash
 recovery, collision suffixing). Only truly empty directories are

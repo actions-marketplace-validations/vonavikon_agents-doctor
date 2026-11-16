@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds a fictional workspace + fake home for the workspace-audit plugin demo.
+"""Builds a fictional workspace + fake home for the agents-doctor plugin demo.
 
 All tokens, keys and hosts in the fixtures are synthetic.
 """

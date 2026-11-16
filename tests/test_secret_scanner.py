@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/secret_scanner.py.
+"""Tests for skills/agents-doctor/scripts/secret_scanner.py.
 
 Every test that produces findings plants canary literals in the scanned
 input and asserts they never appear in json.dumps(results): raw secret
@@ -11,7 +11,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'))
 
 import secret_scanner
 

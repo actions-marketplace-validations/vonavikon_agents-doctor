@@ -1,4 +1,4 @@
-"""Tests for the gate engine (skills/workspace-audit/scripts/gates.py)
+"""Tests for the gate engine (skills/agents-doctor/scripts/gates.py)
 and the finding model (report_model.py).
 
 All facts are fabricated dicts: the engine is pure and never touches the
@@ -9,7 +9,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'))
 
 import gates
 import report_model

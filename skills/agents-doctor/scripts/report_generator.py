@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render a scan.json report as the human-readable AUDIT markdown.
 
-    python skills/workspace-audit/scripts/report_generator.py <scan.json> [--out AUDIT.md]
+    python skills/agents-doctor/scripts/report_generator.py <scan.json> [--out AUDIT.md]
 
 Without --out the markdown goes to stdout; with --out it is written to the
 file. The generator is pure formatting: it reads the report dict, never the
@@ -237,7 +237,7 @@ def generate_markdown(rep):
     sev_counts = _severity_counts(rep)
     stats = rep.get('stats', {})
 
-    out = ['# Workspace Audit', '']
+    out = ['# Agents Doctor', '']
     out.append('Generated {} | schema {} | rules {} | {} files scanned '
                '| {} s'.format(
                    rep.get('generated_at', 'unknown'),

@@ -1,4 +1,4 @@
-"""Tests for skills/workspace-audit/scripts/report_generator.py.
+"""Tests for skills/agents-doctor/scripts/report_generator.py.
 
 Runs the generator over the chaos fixture and over synthetic minimal
 reports: overall status logic, section order, table row counts, secret
@@ -11,14 +11,14 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / 'skills' / 'workspace-audit' / 'scripts'))
+sys.path.insert(0, str(REPO / 'skills' / 'agents-doctor' / 'scripts'))
 
 import report_generator
 
 CHAOS = REPO / 'llm-eval' / 'fixtures' / 'chaos.json'
 
 SECTION_HEADERS = [
-    '# Workspace Audit',
+    '# Agents Doctor',
     '## Executive Summary',
     '## Overall Workspace Health',
     '## Gate Results',
@@ -233,14 +233,14 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'AUDIT.md'
             r = subprocess.run(
-                [sys.executable, str(REPO / 'skills' / 'workspace-audit' /
+                [sys.executable, str(REPO / 'skills' / 'agents-doctor' /
                                      'scripts' / 'report_generator.py'),
                  str(CHAOS), '--out', str(out)],
                 capture_output=True, text=True, cwd=str(REPO))
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertTrue(out.exists())
             md = out.read_text(encoding='utf-8')
-            self.assertIn('# Workspace Audit', md)
+            self.assertIn('# Agents Doctor', md)
             self.assertIn('## Executive Summary', md)
 
 

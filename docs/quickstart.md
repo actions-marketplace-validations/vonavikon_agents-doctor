@@ -5,8 +5,8 @@
 As a Claude Code / Z Code plugin:
 
 ```
-/plugin marketplace add vonavikon/workspace-audit
-/plugin install workspace-audit@workspace-audit
+/plugin marketplace add vonavikon/agents-doctor
+/plugin install agents-doctor@agents-doctor
 ```
 
 Installed as a plugin, the agent resolves the script locations itself
@@ -19,7 +19,7 @@ current one is not the target.
 Standalone, without an agent (Python 3.10+, no dependencies):
 
 ```
-python skills/workspace-audit/scripts/audit_scan.py <path> --home <home> --out scan.json
+python skills/agents-doctor/scripts/audit_scan.py <path> --home <home> --out scan.json
 ```
 
 ## First run
@@ -28,7 +28,7 @@ Ask the agent to run a workspace audit. The plugin runs the deterministic
 scanner over the folder, reads the JSON it produces, filters false
 positives and writes the report. Without an agent, run the scanner
 yourself and read `scan.json`; a stage-4 CLI entry
-(`scripts/workspace_audit.py`) can also turn it into a markdown report.
+(`scripts/agents_doctor.py`) can also turn it into a markdown report.
 
 ## Reading the report
 
@@ -58,7 +58,7 @@ always a fail. Start with failed gates, then sort findings by severity.
 
 | File | What it is |
 |---|---|
-| `<root>/workspace-audit-scan.json` | Scanner output: facts, nine gates, typed findings. Keep it; it is the baseline for the next compare. |
+| `<root>/agents-doctor-scan.json` | Scanner output: facts, nine gates, typed findings. Keep it; it is the baseline for the next compare. |
 | `<root>/AUDIT-<date>.md` | The readable report written by the skill (or by `report_generator.py`). |
 
 Both files stay in the audited root. Nothing else is written anywhere.

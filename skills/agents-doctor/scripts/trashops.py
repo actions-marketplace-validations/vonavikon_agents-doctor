@@ -45,7 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 # shared trash root name; safe_clean and remediate re-export this
-TRASH_DIR_NAME = '.workspace-audit-trash'
+TRASH_DIR_NAME = '.agents-doctor-trash'
 MANIFEST_NAME = 'manifest.json'
 
 # entry statuses that mean "an operation was in flight when the process

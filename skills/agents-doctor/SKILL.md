@@ -1,16 +1,16 @@
 ---
-name: workspace-audit
-description: "Workspace audit by protocol: which harness is actually used, AGENTS.md/CLAUDE.md health (dead links, twin drift, generic blocks), context tax, repositories and folders outside git, sync hooks, secrets (files, git index, remote URLs), skills drift. Use when asked to run a workspace audit, check a folder for junk, verify AGENTS.md freshness, list deletable folders, or tidy up a workspace."
+name: agents-doctor
+description: "Agents doctor by protocol: which harness is actually used, AGENTS.md/CLAUDE.md health (dead links, twin drift, generic blocks), context tax, repositories and folders outside git, sync hooks, secrets (files, git index, remote URLs), skills drift. Use when asked to run a workspace audit, check a folder for junk, verify AGENTS.md freshness, list deletable folders, or tidy up a workspace."
 ---
 
-# Workspace audit
+# Agents doctor
 
 The plugin runs a deterministic scanner and formats the report. It never deletes, edits, or moves anything; decisions stay with the user.
 
 ## Workflow
 
 1. Determine the audit root: the folder from the request or the current one. If the folder has no git repo and no AGENTS.md/CLAUDE.md, ask the user interactively which folder to audit. The home directory is picked up by the scanner itself (`--home`); do not touch it manually.
-2. Run the scanner: `python "<SKILL_DIR>/scripts/audit_scan.py" <root> --home <home> --out <root>/workspace-audit-scan.json`. `<SKILL_DIR>` is the directory containing this SKILL.md (every script resolves its own dependencies from its location, so any absolute path to it works from any current directory). If you cannot determine <SKILL_DIR>, ask the user where the plugin is installed; never guess a path inside the current project. Add `--deep` only on explicit request: it scans git history for secrets and is slow on large repos. If Python is unavailable, stop and say so; do not walk the disk by hand.
+2. Run the scanner: `python "<SKILL_DIR>/scripts/audit_scan.py" <root> --home <home> --out <root>/agents-doctor-scan.json`. `<SKILL_DIR>` is the directory containing this SKILL.md (every script resolves its own dependencies from its location, so any absolute path to it works from any current directory). If you cannot determine <SKILL_DIR>, ask the user where the plugin is installed; never guess a path inside the current project. Add `--deep` only on explicit request: it scans git history for secrets and is slow on large repos. If Python is unavailable, stop and say so; do not walk the disk by hand.
 3. Read the JSON and filter false positives before reporting (see Rules). The scanner gives facts; the skill decides what is a finding.
 4. Write `<root>/AUDIT-<date>.md`: the gates table first, then sections in this order: Loading chain, Instruction files, Context tax, Repositories and folders, Sync mechanics, Secrets, Skills, Verification. End with commands the user runs themselves.
 5. Post a short chat summary: gate statuses (FAIL/WARN/PASS), the single most important finding, path to the report.

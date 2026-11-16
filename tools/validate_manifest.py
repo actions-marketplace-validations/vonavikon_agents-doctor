@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the plugin manifests and top-level packaging of workspace-audit.
+"""Validate the plugin manifests and top-level packaging of agents-doctor.
 
 Checks (exit 0 = all pass, exit 1 = any problem, problems printed):
   - .claude-plugin/plugin.json and marketplace.json exist and parse as JSON

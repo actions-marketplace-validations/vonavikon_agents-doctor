@@ -1,6 +1,6 @@
 # Bench
 
-Synthetic workspaces and a benchmark runner for `skills/workspace-audit/scripts/audit_scan.py`.
+Synthetic workspaces and a benchmark runner for `skills/agents-doctor/scripts/audit_scan.py`.
 
 ## Generate a workspace
 

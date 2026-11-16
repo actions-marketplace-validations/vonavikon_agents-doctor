@@ -1,20 +1,20 @@
-"""fingerprint: keyed one-way fingerprints for workspace-audit evidence.
+"""fingerprint: keyed one-way fingerprints for agents-doctor evidence.
 
 Findings carry fingerprints instead of raw secrets. This module replaces
 the old public-salt SHA-256 with HMAC-SHA256 keyed by a per-installation
 secret: fingerprints stay stable on one machine (baselines, dedup) but
 cannot be computed, compared or rainbow-tabled anywhere else.
 
-Key location (override with the WORKSPACE_AUDIT_KEY_PATH environment
+Key location (override with the AGENTS_DOCTOR_KEY_PATH environment
 variable; an empty value is ignored - the variable exists for tests and
 power users who want the key on another volume):
-- Windows: %LOCALAPPDATA%\\workspace-audit\\secret_key, falling back to
+- Windows: %LOCALAPPDATA%\\agents-doctor\\secret_key, falling back to
   ~\\AppData\\Local when LOCALAPPDATA is unset. The key file inherits the
   NTFS ACLs of the user profile; the stdlib has no ACL API, so no Windows
   permission enforcement is claimed - the guarantee is only that the key
   stays inside the user's local profile directory.
-- POSIX: $XDG_CONFIG_HOME/workspace-audit/secret_key, default
-  ~/.config/workspace-audit/secret_key. The directory is created 0o700
+- POSIX: $XDG_CONFIG_HOME/agents-doctor/secret_key, default
+  ~/.config/agents-doctor/secret_key. The directory is created 0o700
   and the key file is written 0o600 (umask permitting).
 
 Key material: 32 random bytes (secrets.token_bytes). A key file that
@@ -43,7 +43,7 @@ from pathlib import Path
 
 KEY_BYTES = 32
 MIN_KEY_BYTES = 16
-ENV_KEY_PATH = 'WORKSPACE_AUDIT_KEY_PATH'
+ENV_KEY_PATH = 'AGENTS_DOCTOR_KEY_PATH'
 
 
 class FingerprintKeyError(Exception):
@@ -51,15 +51,15 @@ class FingerprintKeyError(Exception):
 
 
 def key_path():
-    """Location of the key file. WORKSPACE_AUDIT_KEY_PATH wins when set."""
+    """Location of the key file. AGENTS_DOCTOR_KEY_PATH wins when set."""
     override = os.environ.get(ENV_KEY_PATH)
     if override:
         return Path(override)
     if os.name == 'nt':
         base = os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local'
-        return Path(base) / 'workspace-audit' / 'secret_key'
+        return Path(base) / 'agents-doctor' / 'secret_key'
     base = os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config'
-    return Path(base) / 'workspace-audit' / 'secret_key'
+    return Path(base) / 'agents-doctor' / 'secret_key'
 
 
 def get_key(create=True):
@@ -125,7 +125,7 @@ def main(argv=None):
         print('usage: python fingerprint.py --check', file=sys.stderr)
         return 1
     try:
-        sample = fingerprint('workspace-audit self-test')
+        sample = fingerprint('agents-doctor self-test')
     except FingerprintKeyError as exc:
         print('key check failed: %s' % exc, file=sys.stderr)
         return 1

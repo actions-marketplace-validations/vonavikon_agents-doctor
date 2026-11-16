@@ -1,8 +1,8 @@
-"""Tests for skills/workspace-audit/scripts/history_scan.py.
+"""Tests for skills/agents-doctor/scripts/history_scan.py.
 
 Builds throwaway git repositories (per-command fixture identity,
 GIT_OPTIONAL_LOCKS=0, DEMO-marked synthetic secrets only). Every scan
-pins WORKSPACE_AUDIT_KEY_PATH into the temp directory so fingerprints
+pins AGENTS_DOCTOR_KEY_PATH into the temp directory so fingerprints
 never touch the real per-installation key.
 """
 
@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import history_scan  # noqa: E402
@@ -46,8 +46,8 @@ class HistoryScanTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix='wsa-hist-test-')
         self.addCleanup(self._tmp.cleanup)
         self.base = Path(self._tmp.name)
-        os.environ['WORKSPACE_AUDIT_KEY_PATH'] = str(self.base / 'secret_key')
-        self.addCleanup(os.environ.pop, 'WORKSPACE_AUDIT_KEY_PATH', None)
+        os.environ['AGENTS_DOCTOR_KEY_PATH'] = str(self.base / 'secret_key')
+        self.addCleanup(os.environ.pop, 'AGENTS_DOCTOR_KEY_PATH', None)
 
     # --- fixture plumbing --------------------------------------------------
 

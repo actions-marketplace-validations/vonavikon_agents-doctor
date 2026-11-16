@@ -15,7 +15,7 @@ import time
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_scan  # noqa: E402

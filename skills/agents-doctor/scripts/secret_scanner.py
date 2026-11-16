@@ -1,4 +1,4 @@
-"""secret_scanner: secret detection and redaction for workspace-audit.
+"""secret_scanner: secret detection and redaction for agents-doctor.
 
 Contract: raw secret values never leave this module. Every finding carries
 only the file, line, kind, rule id, confidence, a rule-derived mask and an

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""QA evaluation for workspace-audit.
+"""QA evaluation for agents-doctor.
 
 Method: programmatic fact checks. Expectations (scenarios/*/expected.json)
 are locked before the run; the runner builds each fixture, runs the
@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 
 QA = Path(__file__).parent
-SCANNER = QA.parent / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = QA.parent / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 
 
 def rm_force(p):
@@ -167,7 +167,7 @@ def eval_scenario(sc_dir):
 
 def main():
     scenarios = sorted(p for p in (QA / 'scenarios').iterdir() if p.is_dir())
-    lines = ['# workspace-audit QA eval, ' + date.today().isoformat(), '']
+    lines = ['# agents-doctor QA eval, ' + date.today().isoformat(), '']
     lines += ['## Method', '',
               'Programmatic fact checks: expectations in `scenarios/*/expected.json` '
               'are locked before the run; the runner builds each fixture, runs the '

@@ -1,4 +1,4 @@
-"""Coverage tests for skills/workspace-audit/scripts/audit_scan.py.
+"""Coverage tests for skills/agents-doctor/scripts/audit_scan.py.
 
 Targets the branches the main suite leaves uncovered: OSError guards in
 the walk and helpers, repo_extra plumbing (hooks, upstream, nested
@@ -29,7 +29,7 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_scan  # noqa: E402
@@ -138,8 +138,8 @@ class AuditScanCase(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix='wsa-cov-'))
         self.addCleanup(force_rmtree, self.base)
-        os.environ['WORKSPACE_AUDIT_KEY_PATH'] = str(self.base / 'fp_key')
-        self.addCleanup(os.environ.pop, 'WORKSPACE_AUDIT_KEY_PATH', None)
+        os.environ['AGENTS_DOCTOR_KEY_PATH'] = str(self.base / 'fp_key')
+        self.addCleanup(os.environ.pop, 'AGENTS_DOCTOR_KEY_PATH', None)
 
 
 # --- small pure helpers ---------------------------------------------------------
@@ -165,8 +165,8 @@ class RichWorkspaceScan(AuditScanCase):
     def setUpClass(cls):
         cls.base = Path(tempfile.mkdtemp(prefix='wsa-cov-rich-'))
         cls.addClassCleanup(force_rmtree, cls.base)
-        os.environ['WORKSPACE_AUDIT_KEY_PATH'] = str(cls.base / 'fp_key')
-        cls.addClassCleanup(os.environ.pop, 'WORKSPACE_AUDIT_KEY_PATH', None)
+        os.environ['AGENTS_DOCTOR_KEY_PATH'] = str(cls.base / 'fp_key')
+        cls.addClassCleanup(os.environ.pop, 'AGENTS_DOCTOR_KEY_PATH', None)
         cls.ws, cls.home = cls._build(cls.base)
         cls.rep = audit_scan.scan(cls.ws, cls.home)
 
@@ -608,7 +608,7 @@ class MainCli(AuditScanCase):
     def test_main_exits_on_fingerprint_key_error(self):
         ws, home = self.tiny_workspace()
         (ws / '.env').write_text(DEMO_SECRET_LINE + '\n')
-        Path(os.environ['WORKSPACE_AUDIT_KEY_PATH']).write_bytes(b'short')
+        Path(os.environ['AGENTS_DOCTOR_KEY_PATH']).write_bytes(b'short')
         out_json = self.base / 'scan.json'
         with self.assertRaises(SystemExit) as cx:
             self.run_main([str(ws), '--home', str(home), '--out', str(out_json)])

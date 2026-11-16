@@ -1,4 +1,4 @@
-"""Centralized git remote URL sanitizer for workspace-audit.
+"""Centralized git remote URL sanitizer for agents-doctor.
 
 Contract:
 - Credential material embedded in a remote URL (user:pass segments,

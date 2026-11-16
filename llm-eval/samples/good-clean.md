@@ -1,4 +1,4 @@
-# Workspace audit - AUDIT-2026-11-16
+# Agents doctor - AUDIT-2026-11-16
 
 Everything is quiet: 4 findings, none critical. Four gates sit at warn - G2
 (no configuration files found at all), G4 (four top-level folders outside
@@ -11,4 +11,4 @@ this audit.
 
 Re-run the scan yourself once you have tidied up:
 
-    python skills/workspace-audit/scripts/audit_scan.py . --out re-scan.json
+    python skills/agents-doctor/scripts/audit_scan.py . --out re-scan.json

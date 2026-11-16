@@ -1,6 +1,6 @@
-"""Tests for skills/workspace-audit/scripts/fingerprint.py.
+"""Tests for skills/agents-doctor/scripts/fingerprint.py.
 
-Every test pins WORKSPACE_AUDIT_KEY_PATH into a temp directory: the
+Every test pins AGENTS_DOCTOR_KEY_PATH into a temp directory: the
 suite must never read or create the real per-installation key.
 """
 
@@ -12,12 +12,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'workspace-audit' / 'scripts'
+SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agents-doctor' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
 import fingerprint as fp  # noqa: E402
 
-SAMPLE = 'workspace-audit test value'
+SAMPLE = 'agents-doctor test value'
 
 
 class FingerprintKeyTest(unittest.TestCase):
@@ -82,7 +82,7 @@ class FingerprintKeyTest(unittest.TestCase):
 
     @unittest.skipIf(os.name == 'nt', 'POSIX permission bits')
     def test_posix_permission_bits(self):
-        nested = self.base / 'cfg' / 'workspace-audit' / 'secret_key'
+        nested = self.base / 'cfg' / 'agents-doctor' / 'secret_key'
         self.set_key_path(nested)
         fp.get_key()
         self.assertEqual(stat.S_IMODE(os.stat(nested).st_mode), 0o600)

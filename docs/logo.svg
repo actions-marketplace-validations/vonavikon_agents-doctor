@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <!-- agents-doctor logo: pixel-art D + medical cross, Sega/retro style -->
+  <!-- 12x12 grid, each pixel = 10 units -->
+  <rect width="120" height="120" fill="#0d1117"/>
+
+  <!-- Letter D: terminal green -->
+  <g fill="#00e676">
+    <!-- Row 0: top -->
+    <rect x="10" y="10" width="10" height="10"/>
+    <rect x="20" y="10" width="10" height="10"/>
+    <rect x="30" y="10" width="10" height="10"/>
+    <rect x="40" y="10" width="10" height="10"/>
+    <rect x="50" y="10" width="10" height="10"/>
+    <!-- Row 1 -->
+    <rect x="10" y="20" width="10" height="10"/>
+    <rect x="60" y="20" width="10" height="10"/>
+    <!-- Row 2 -->
+    <rect x="10" y="30" width="10" height="10"/>
+    <rect x="70" y="30" width="10" height="10"/>
+    <!-- Row 3 -->
+    <rect x="10" y="40" width="10" height="10"/>
+    <rect x="70" y="40" width="10" height="10"/>
+    <!-- Row 4 -->
+    <rect x="10" y="50" width="10" height="10"/>
+    <rect x="70" y="50" width="10" height="10"/>
+    <!-- Row 5: midpoint -->
+    <rect x="10" y="60" width="10" height="10"/>
+    <rect x="70" y="60" width="10" height="10"/>
+    <!-- Row 6 -->
+    <rect x="10" y="70" width="10" height="10"/>
+    <rect x="70" y="70" width="10" height="10"/>
+    <!-- Row 7 -->
+    <rect x="10" y="80" width="10" height="10"/>
+    <rect x="70" y="80" width="10" height="10"/>
+    <!-- Row 8 -->
+    <rect x="10" y="90" width="10" height="10"/>
+    <rect x="70" y="90" width="10" height="10"/>
+    <!-- Row 9: bottom curve -->
+    <rect x="10" y="100" width="10" height="10"/>
+    <rect x="60" y="100" width="10" height="10"/>
+    <!-- Row 10: bottom -->
+    <rect x="10" y="110" width="10" height="10"/>
+    <rect x="20" y="110" width="10" height="10"/>
+    <rect x="30" y="110" width="10" height="10"/>
+    <rect x="40" y="110" width="10" height="10"/>
+    <rect x="50" y="110" width="10" height="10"/>
+  </g>
+
+  <!-- Medical cross: cyan, top-right -->
+  <g fill="#00bcd4">
+    <!-- Horizontal bar -->
+    <rect x="90" y="10" width="10" height="10"/>
+    <rect x="100" y="10" width="10" height="10"/>
+    <rect x="110" y="10" width="10" height="10" transform="translate(-10,10)"/>
+    <!-- Center -->
+    <rect x="100" y="20" width="10" height="10"/>
+    <!-- Vertical bar -->
+    <rect x="100" y="10" width="10" height="10"/>
+    <rect x="100" y="30" width="10" height="10"/>
+  </g>
+
+  <!-- Simplified cross (3x3 pixels) -->
+  <g fill="#00bcd4" opacity="0">
+    <!-- Hidden, replaced by the explicit pixels above -->
+  </g>
+
+  <!-- Pulse line: bottom, accent green -->
+  <g fill="#76ff03" opacity="0.7">
+    <rect x="85" y="95" width="5" height="5"/>
+    <rect x="90" y="90" width="5" height="5"/>
+    <rect x="95" y="85" width="5" height="5"/>
+    <rect x="100" y="80" width="5" height="5"/>
+    <rect x="105" y="85" width="5" height="5"/>
+    <rect x="110" y="95" width="5" height="5"/>
+    <rect x="115" y="100" width="5" height="5"/>
+    <rect x="85" y="100" width="5" height="5"/>
+  </g>
+
+  <!-- Pixel border accent: top-left corner -->
+  <g fill="#00e676" opacity="0.3">
+    <rect x="0" y="0" width="10" height="10"/>
+    <rect x="10" y="0" width="10" height="10" opacity="0.5"/>
+    <rect x="0" y="10" width="10" height="10" opacity="0.5"/>
+  </g>
+
+  <!-- Pixel border accent: bottom-right corner -->
+  <g fill="#00bcd4" opacity="0.3">
+    <rect x="110" y="110" width="10" height="10"/>
+    <rect x="100" y="110" width="10" height="10" opacity="0.5"/>
+    <rect x="110" y="100" width="10" height="10" opacity="0.5"/>
+  </g>
+</svg>

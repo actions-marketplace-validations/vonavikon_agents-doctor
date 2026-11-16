@@ -1,6 +1,8 @@
 {
-  "name": "workspace-audit",
+  "name": "agents-doctor",
   "version": "0.7.0",
-  "description": "Agent workspace audit: instruction files (AGENTS.md/CLAUDE.md), repositories, junk, secrets, skills. Deterministic scanner plus a gated report. Read-only, deletes nothing.",
-  "author": { "name": "vonavikon" }
+  "description": "Doctor for AI agent workspaces: AGENTS.md health check, leaked secrets (HMAC, redacted), safe cleanup with restore, SARIF for CI, plain-language report EN/RU. Claude Code / Z Code. Read-only.",
+  "author": {
+    "name": "vonavikon"
+  }
 }

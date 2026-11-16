@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "root": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace",
-  "home": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home",
+  "root": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace",
+  "home": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home",
   "generated_at": "2026-11-16T16:21:28+03:00",
   "top_level": [
     {
@@ -217,32 +217,32 @@
     "session_files": [
       {
         "role": "user-zcode",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\AGENTS.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\AGENTS.md",
         "size_bytes": 37
       },
       {
         "role": "user-claude",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.claude\\CLAUDE.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.claude\\CLAUDE.md",
         "size_bytes": 49
       },
       {
         "role": "project",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\AGENTS.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\AGENTS.md",
         "size_bytes": 65242
       },
       {
         "role": "memory-index",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md",
         "size_bytes": 42188
       }
     ],
     "project_total_bytes": 65242,
     "benchmark_project_bytes": 16384,
     "memory_over_limit": [
-      "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
+      "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
     ],
     "memory_over_lines": [
-      "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
+      "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\cli\\memories\\projects\\demo\\memory\\MEMORY.md"
     ]
   },
   "harness": {
@@ -274,7 +274,7 @@
       },
       {
         "tool": "codex",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.codex",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.codex",
         "exists": false,
         "reads": [
           "AGENTS.md"
@@ -310,7 +310,7 @@
         "desc_len": 382,
         "has_triggers": false,
         "md5": "b34d00b5427ccb3142e772ffd900749e",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
         "location": "user-zcode"
       },
       {
@@ -318,7 +318,7 @@
         "desc_len": 25,
         "has_triggers": false,
         "md5": "5ac1938e34b81994482907f7608e644c",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md",
         "location": "project-agents"
       },
       {
@@ -326,7 +326,7 @@
         "desc_len": 1190,
         "has_triggers": false,
         "md5": "5fb2eaef387983a5b082bfa1da303904",
-        "path": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
+        "path": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
         "location": "project-agents"
       }
     ],
@@ -336,14 +336,14 @@
         "copies": 2,
         "sync": "DIVERGED",
         "paths": [
-          "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
-          "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+          "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+          "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
         ]
       }
     ],
     "locations_checked": [
-      "user-zcode: X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills",
-      "project-agents: X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills"
+      "user-zcode: X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills",
+      "project-agents: X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills"
     ]
   },
   "context_budget": [
@@ -1195,7 +1195,7 @@
       "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
       "evidence": [
         {
-          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md"
+          "file": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md"
         }
       ],
       "confidence": 0.8,
@@ -1213,7 +1213,7 @@
       "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
       "evidence": [
         {
-          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md"
+          "file": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\doc-helper\\SKILL.md"
         }
       ],
       "confidence": 0.8,
@@ -1231,7 +1231,7 @@
       "description": "The harness refuses to load a skill whose description exceeds the limit.",
       "evidence": [
         {
-          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
+          "file": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md",
           "desc_len": 1190
         }
       ],
@@ -1250,7 +1250,7 @@
       "description": "Without a \"use when\"-style phrase the harness rarely picks the skill.",
       "evidence": [
         {
-          "file": "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+          "file": "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
         }
       ],
       "confidence": 0.8,
@@ -1271,8 +1271,8 @@
           "name": "x-helper",
           "copies": 2,
           "paths": [
-            "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
-            "X:\\Repos\\workspace-audit\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
+            "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\home\\.zcode\\skills\\x-helper\\SKILL.md",
+            "X:\\Repos\\agents-doctor\\qa\\scenarios\\03-leaver-chaos\\run\\workspace\\.agents\\skills\\x-helper\\SKILL.md"
           ]
         }
       ],

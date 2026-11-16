@@ -1,4 +1,4 @@
-# Workspace Audit
+# Agents Doctor
 
 Generated 2026-11-16T16:21:28+03:00 | schema 1.0 | rules 0.4.0 | 18 files scanned | 0.5 s
 
@@ -44,7 +44,7 @@ Status: FAIL.
 | RUL-007 | high | Two rule sources at tools | tools |
 | SEC-001 | critical | Exposed secret in .mcp.json:6 | .mcp.json:6 |
 | SEC-002 | critical | Secret tracked in git at legacy-crm: config.py:1 | config.py:1 |
-| SKL-003 | high | Description of skill 'x-helper' is 1190 chars, limit 1024 | X:\Repos\workspace-audit\qa\scenarios\03-leaver-chaos\run\workspace\.agents\skills\x-helper\SKILL.md |
+| SKL-003 | high | Description of skill 'x-helper' is 1190 chars, limit 1024 | X:\Repos\agents-doctor\qa\scenarios\03-leaver-chaos\run\workspace\.agents\skills\x-helper\SKILL.md |
 | SKL-005 | high | Diverged copies of skill 'x-helper' | x-helper |
 
 ## All Findings

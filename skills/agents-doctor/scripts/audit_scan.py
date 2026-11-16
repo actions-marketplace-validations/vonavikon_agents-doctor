@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""workspace-audit: deterministic agent workspace scanner.
+"""agents-doctor: deterministic agent workspace scanner.
 
 Called from the skill:
     python scripts/audit_scan.py <root> [--home <home>] [--deep] --out scan.json
@@ -852,7 +852,7 @@ def main():
                    a.history_all_refs, profile=prof)
     except FingerprintKeyError as e:
         sys.exit('fingerprint key unavailable: %s\n'
-                 'fix with: python skills/workspace-audit/scripts/fingerprint.py --check'
+                 'fix with: python skills/agents-doctor/scripts/fingerprint.py --check'
                  % str(e))
     if a.baseline and _exists(Path(a.baseline)):
         try:

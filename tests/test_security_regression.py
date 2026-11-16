@@ -1,6 +1,6 @@
-"""Security regression suite for the workspace-audit scanner.
+"""Security regression suite for the agents-doctor scanner.
 
-Runs skills/workspace-audit/scripts/audit_scan.py end to end against a
+Runs skills/agents-doctor/scripts/audit_scan.py end to end against a
 planted fixture workspace and checks four properties from the
 production-readiness spec:
 
@@ -30,7 +30,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCANNER = REPO_ROOT / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = REPO_ROOT / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 
 # Unique literal canaries planted into the fixture.  They live only in
 # the fixture tree; every assertion below demands they never show up in

@@ -18,7 +18,7 @@ _spec = importlib.util.spec_from_file_location('grade_report_under_test', GRADE_
 gr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gr)
 
-GOOD_REPORT = """# Workspace audit report
+GOOD_REPORT = """# Agents doctor report
 
 The scan completed with one critical finding: SEC-001 records a demo token in
 `.env:3`. The report cites it verbatim from scan.json and adds nothing that
@@ -33,10 +33,10 @@ value into a vault, then re-run the audit before touching anything cosmetic.
 
 When you are ready, run the audit yourself with:
 
-    python skills/workspace-audit/scripts/audit_scan.py . --out scan.json
+    python skills/agents-doctor/scripts/audit_scan.py . --out scan.json
 """
 
-BAD_REPORT = """# Workspace audit report
+BAD_REPORT = """# Agents doctor report
 
 The scan completed and everything looks fine overall. Gate G1 (structure) is
 PASS, and gate G2 is PASS as well even though the scan says unknown. One

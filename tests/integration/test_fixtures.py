@@ -1,6 +1,6 @@
-"""Integration tests for the workspace-audit scanner (spec section 8.2).
+"""Integration tests for the agents-doctor scanner (spec section 8.2).
 
-Runs skills/workspace-audit/scripts/audit_scan.py end to end against the
+Runs skills/agents-doctor/scripts/audit_scan.py end to end against the
 fixture workspaces built by fixtures.py and asserts the report contract
 per fixture, plus a schema smoke applied to every run. All planted
 secrets are DEMO-marked synthetics and must never appear in raw form in
@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fixtures
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCANNER = REPO_ROOT / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = REPO_ROOT / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 
 GIT_AVAILABLE = shutil.which('git') is not None
 

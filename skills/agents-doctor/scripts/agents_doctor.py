@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""workspace-audit command line (production-readiness stage 4).
+"""agents-doctor command line (production-readiness stage 4).
 
 Single entry point on top of the scanner: focused audits, baseline
 comparison, finding lookup and guarded fixes. The scanner runs
@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit_scan  # noqa: E402  (in-process scanner)
 import remediate   # noqa: E402  (fix engine + fingerprint diff)
 
-PROG = 'workspace_audit'
+PROG = 'agents_doctor'
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -209,8 +209,8 @@ def cmd_fix(a):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog='workspace_audit.py',
-        description='workspace-audit: scan an agent workspace, compare audits, '
+        prog='agents_doctor.py',
+        description='agents-doctor: scan an agent workspace, compare audits, '
                     'explain findings and plan guarded fixes.',
         epilog='Fixes are a dry run by default: "fix" only prints a plan. '
                '--apply still asks for an interactive confirmation and every '

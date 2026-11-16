@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[1]
 LLM = REPO / 'llm-eval'
 FIXTURES = LLM / 'fixtures'
 SAMPLES = LLM / 'samples'
-SKILL_MD = REPO / 'skills' / 'workspace-audit' / 'SKILL.md'
+SKILL_MD = REPO / 'skills' / 'agents-doctor' / 'SKILL.md'
 RAW_TOKEN_RX = re.compile(r'sk-[A-Za-z0-9_-]{16,}')
 
 

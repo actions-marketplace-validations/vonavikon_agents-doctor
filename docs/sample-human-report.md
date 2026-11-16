@@ -1,6 +1,6 @@
 # What the audit found — in plain words
 
-Folder checked: X:\Repos\workspace-audit\qa\scenarios\03-leaver-chaos\run\workspace
+Folder checked: X:\Repos\agents-doctor\qa\scenarios\03-leaver-chaos\run\workspace
 
 ## The short version
 

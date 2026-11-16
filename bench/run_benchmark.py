@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark runner for skills/workspace-audit/scripts/audit_scan.py.
+"""Benchmark runner for skills/agents-doctor/scripts/audit_scan.py.
 
     python bench/run_benchmark.py <workspace_dir> --home <home_dir> \
         --out bench/BENCH-2026-11-16.md [--label "local windows"] [--max-wall 60]
@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCANNER = REPO / 'skills' / 'workspace-audit' / 'scripts' / 'audit_scan.py'
+SCANNER = REPO / 'skills' / 'agents-doctor' / 'scripts' / 'audit_scan.py'
 HEADER = ('| date | label | files | size MB | wall (subprocess), s | '
           'scan() peak alloc, MB | findings | gates f/w/p/u/na | skipped links |')
 SEP = '|---|---|---|---|---|---|---|---|---|'

@@ -2,7 +2,7 @@
 description: Run a workspace audit (full or focused: security, structure, agents; also human report, safe clean, compare, explain, fix)
 ---
 
-# /workspace-audit
+# /agents-doctor
 
 Parse `$ARGUMENTS` and route to one of the modes below. When several
 folders could be the audit root, ask the user first. The scanner is
@@ -11,7 +11,7 @@ bulk.
 
 ## Locating the scripts (do this first)
 
-The entry scripts live at `<PLUGIN_ROOT>/skills/workspace-audit/scripts/`.
+The entry scripts live at `<PLUGIN_ROOT>/skills/agents-doctor/scripts/`.
 Resolve `<PLUGIN_ROOT>` exactly one of these ways, in order:
 
 1. Claude Code command context: the `${CLAUDE_PLUGIN_ROOT}` variable (use it
@@ -27,7 +27,7 @@ work from any current directory: they resolve their own dependencies.
 ## `human` (for non-technical readers)
 
 Generate the plain-language value report from the last scan (or run a fresh
-one first): `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/report_human.py <scan.json> --lang en|ru [--after <scan2.json>]`.
+one first): `python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/report_human.py <scan.json> --lang en|ru [--after <scan2.json>]`.
 It answers, in human words: what is wrong, what it costs (extra tokens every
 session with the assumption printed, disk space, secrets left in plain
 sight), and — after a cleanup, with `--after` — what got better. Post a
@@ -36,20 +36,20 @@ clean` as the next step for users who want action without reading reports.
 
 ## `clean` (safe cleanup for non-technical users)
 
-Run the guided cleanup wizard: `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/safe_clean.py <root>`.
+Run the guided cleanup wizard: `python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/safe_clean.py <root>`.
 Walk the user through it. Rules the agent must keep: show the preview
 categories and sizes in plain words; the fixed "will NOT touch" line is
 non-negotiable (tracked files, files with keys, anything the audit is
 unsure about); confirmation is the user typing YES themselves — never
 confirm on their behalf, never pass --yes; everything movable goes to the
-`.workspace-audit-trash` folder and can be restored; after cleanup offer
+`.agents-doctor-trash` folder and can be restored; after cleanup offer
 to re-run the audit and produce the human before/after report with
 `--after`.
 
 ## no arguments or `full`
 
 Run the full audit exactly per the workflow in
-[SKILL.md](../skills/workspace-audit/SKILL.md): scan, filter false
+[SKILL.md](../skills/agents-doctor/SKILL.md): scan, filter false
 positives, write `AUDIT-<date>.md`, post the chat summary (gate statuses,
 the most important finding, path to the report).
 
@@ -64,13 +64,13 @@ gates of the requested focus:
 | structure | G1 Workspace structure, G4 Directory ownership, G9 Workspace health |
 | agents | G2 Configuration integrity, G3 Rules consistency, G5 Skills, G8 Agent environment governance |
 
-The scan itself is never narrowed: the same `workspace-audit-scan.json` is
+The scan itself is never narrowed: the same `agents-doctor-scan.json` is
 produced, only the reporting filters.
 
 If the stage-4 CLI entry is present, offer the deterministic focus first:
 
 ```
-python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/workspace_audit.py audit <root> --focus security
+python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/agents_doctor.py audit <root> --focus security
 ```
 
 If it is not available, filter the JSON yourself: keep the gates of the
@@ -82,11 +82,11 @@ and drop the other report sections.
 Run the audit with a baseline against the previous scan:
 
 ```
-python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/audit_scan.py <root> --home <home> \
-    --baseline <root>/workspace-audit-scan.json --out <root>/workspace-audit-scan-new.json
+python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/audit_scan.py <root> --home <home> \
+    --baseline <root>/agents-doctor-scan.json --out <root>/agents-doctor-scan-new.json
 ```
 
-If no previous `workspace-audit-scan.json` exists in the root, say so and
+If no previous `agents-doctor-scan.json` exists in the root, say so and
 offer a full audit instead. Then summarize four groups:
 
 - NEW: fingerprints present only in the new scan
@@ -109,13 +109,13 @@ into a value. If the fid does not exist, list the fids that do.
 Remediation is plan-only first, always:
 
 1. Produce the plan without touching anything:
-   `python "${CLAUDE_PLUGIN_ROOT}/skills/workspace-audit/scripts/remediate.py <scan.json> --fid <fid>`
+   `python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/remediate.py <scan.json> --fid <fid>`
 2. Show the plan to the user: what will be moved where, what command would
    be run, what stays untouched.
 3. Ask for an explicit confirmation ("apply"). A vague or missing answer
    means no.
 4. Only after confirmation run the same command with `--apply`. Moved files
-   go to `.workspace-audit-trash/`, never to a direct delete.
+   go to `.agents-doctor-trash/`, never to a direct delete.
 5. Re-run the audit and show the gate status before and after.
 
 If the finding has `autofix_available: false`, say so and give the
@@ -126,13 +126,13 @@ recommendation as commands the user runs.
 Reply with this usage list and stop:
 
 ```
-/workspace-audit                  full audit
-/workspace-audit security         only secrets and git security gates
-/workspace-audit structure        only layout and ownership gates
-/workspace-audit agents           only instruction, skills and config gates
-/workspace-audit compare          diff against the previous scan
-/workspace-audit explain <fid>    walk through one finding
-/workspace-audit fix <fid>        plan a fix (applies nothing without confirmation)
+/agents-doctor                  full audit
+/agents-doctor security         only secrets and git security gates
+/agents-doctor structure        only layout and ownership gates
+/agents-doctor agents           only instruction, skills and config gates
+/agents-doctor compare          diff against the previous scan
+/agents-doctor explain <fid>    walk through one finding
+/agents-doctor fix <fid>        plan a fix (applies nothing without confirmation)
 ```
 
 ## Safety
@@ -141,4 +141,4 @@ Reply with this usage list and stop:
 - Secrets stay masked: file, line, kind, mask, salted fingerprint. Never
   reproduce, complete or guess a value.
 - No bulk delete. `fix` handles one finding at a time, moves to
-  `.workspace-audit-trash/`, and only after an explicit confirmation.
+  `.agents-doctor-trash/`, and only after an explicit confirmation.

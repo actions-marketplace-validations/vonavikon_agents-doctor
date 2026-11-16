@@ -6,14 +6,14 @@ modules need nothing beyond the standard library.
 ## Scanner: audit_scan.py
 
 ```
-python skills/workspace-audit/scripts/audit_scan.py <path> [--home <dir>]
+python skills/agents-doctor/scripts/audit_scan.py <path> [--home <dir>]
     [--deep] [--baseline <old scan.json>] [--out <file>]
 ```
 
 Example:
 
 ```
-python skills/workspace-audit/scripts/audit_scan.py demo/employee-workspace \
+python skills/agents-doctor/scripts/audit_scan.py demo/employee-workspace \
     --home demo/fake-home --out demo-scan.json
 ```
 
@@ -26,12 +26,12 @@ code), 1 when the root is not a directory or the report cannot be written,
 2 on unknown flags. An unreadable `--baseline` file is skipped, not an
 error.
 
-## CLI entry: workspace_audit.py (stage 4)
+## CLI entry: agents_doctor.py (stage 4)
 
 One command over the scanner and the stage-4 modules.
 
 ```
-python skills/workspace-audit/scripts/workspace_audit.py audit <path>
+python skills/agents-doctor/scripts/agents_doctor.py audit <path>
     [--focus security|structure|agents] [--report md|sarif|both]
     [--deep] [--home <dir>] [--baseline <scan.json>] [--out <file>]
 ```
@@ -41,26 +41,26 @@ Runs the scan, then writes the markdown report and/or the SARIF export.
 findings present the subcommand exits 1, so CI can gate on it.
 
 ```
-python skills/workspace-audit/scripts/workspace_audit.py compare <scan.json>
+python skills/agents-doctor/scripts/agents_doctor.py compare <scan.json>
     --baseline <old scan.json>
 ```
 
 Prints the fingerprint diff: NEW, RESOLVED, PERSISTING, CHANGED.
 
 ```
-python skills/workspace-audit/scripts/workspace_audit.py explain <scan.json> <fid>
+python skills/agents-doctor/scripts/agents_doctor.py explain <scan.json> <fid>
 ```
 
 Prints one typed finding: title, description, evidence, severity, status,
 confidence, recommendation.
 
 ```
-python skills/workspace-audit/scripts/workspace_audit.py fix <scan.json>
+python skills/agents-doctor/scripts/agents_doctor.py fix <scan.json>
     --fid <fid> [--apply]
 ```
 
 Prints the remediation plan. `--apply` executes it (moves to
-`.workspace-audit-trash/`, never deletes); run an audit again afterwards.
+`.agents-doctor-trash/`, never deletes); run an audit again afterwards.
 
 Exit codes: 0 success, 1 findings present or a failed check, 2 requested
 fid or file not found.
@@ -68,7 +68,7 @@ fid or file not found.
 ## Report writer: report_generator.py (stage 4)
 
 ```
-python skills/workspace-audit/scripts/report_generator.py <scan.json>
+python skills/agents-doctor/scripts/report_generator.py <scan.json>
     [--out AUDIT-<date>.md]
 ```
 
@@ -79,7 +79,7 @@ written, 1 bad input.
 ## SARIF export: sarif.py (stage 4)
 
 ```
-python skills/workspace-audit/scripts/sarif.py <scan.json> [--out scan.sarif]
+python skills/agents-doctor/scripts/sarif.py <scan.json> [--out scan.sarif]
 ```
 
 Exports findings as SARIF 2.1.0 for code viewers that accept it (GitHub
@@ -88,13 +88,13 @@ code scanning, VS Code). Exit 0 written, 1 bad input.
 ## Remediation: remediate.py (stage 4)
 
 ```
-python skills/workspace-audit/scripts/remediate.py <scan.json>
+python skills/agents-doctor/scripts/remediate.py <scan.json>
     [--fid <fid>] [--apply]
 ```
 
 Plans remediations for findings with `autofix_available: true` (one, with
 `--fid`; all, without). Plan-only unless `--apply` is given; applied moves
-go to `.workspace-audit-trash/`. Exit 0 plan ready (or applied), 1 a
+go to `.agents-doctor-trash/`. Exit 0 plan ready (or applied), 1 a
 planned step failed, 2 fid not found.
 
 ## Tools
@@ -149,8 +149,8 @@ every check passes, 1 otherwise.
 
 ## Human layer
 
-- `python skills/workspace-audit/scripts/report_human.py <scan.json> [--lang en|ru] [--sessions 10] [--after <scan2.json>] [--out HUMAN-REPORT.md]` — plain-language value report; `--after` produces the before/after story.
-- `python skills/workspace-audit/scripts/safe_clean.py <root> [--home H] [--yes] [--include-cautious] [--max-bytes N]` — guided safe cleanup; interactive typed-YES confirmation, trash-first, exit 0/1/2/3 (see `--help`).
+- `python skills/agents-doctor/scripts/report_human.py <scan.json> [--lang en|ru] [--sessions 10] [--after <scan2.json>] [--out HUMAN-REPORT.md]` — plain-language value report; `--after` produces the before/after story.
+- `python skills/agents-doctor/scripts/safe_clean.py <root> [--home H] [--yes] [--include-cautious] [--max-bytes N]` — guided safe cleanup; interactive typed-YES confirmation, trash-first, exit 0/1/2/3 (see `--help`).
 - `python tools/gen_sample_human_report.py` — regenerates the EN/RU sample reports from the chaos fixture.
 
 ## Scanner flags added in v0.7.0
@@ -158,5 +158,5 @@ every check passes, 1 otherwise.
 - `--profile` — per-stage timings to stderr (walk, git, context, enrich, gates).
 - `--history-depth N` — cap the deep history scan per repo; coverage is reported and incomplete scans never read as pass.
 - `--history-all-refs` — deep-scan across all refs, not only HEAD.
-- `python skills/workspace-audit/scripts/safe_clean.py restore <run_dir> [--root R]` — restore a cleanup session from its manifest (typed YES).
+- `python skills/agents-doctor/scripts/safe_clean.py restore <run_dir> [--root R]` — restore a cleanup session from its manifest (typed YES).
 - `python llm-eval/run_eval.py --model offline` — the LLM-layer grading pipeline without network or API keys; `--model <name> --api <base-url> --key-env VAR` runs a real model against the frozen fixtures.

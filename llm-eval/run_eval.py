@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end runner for the LLM layer of workspace-audit.
+"""End-to-end runner for the LLM layer of agents-doctor.
 
     python llm-eval/run_eval.py --model offline
     python llm-eval/run_eval.py --model my-model --api https://api.example.com/v1 \
@@ -46,7 +46,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-SKILL_MD = REPO / 'skills' / 'workspace-audit' / 'SKILL.md'
+SKILL_MD = REPO / 'skills' / 'agents-doctor' / 'SKILL.md'
 DEFAULT_SAMPLES = HERE / 'samples'
 DEFAULT_FIXTURES = [HERE / 'fixtures' / 'clean.json',
                     HERE / 'fixtures' / 'chaos.json']
