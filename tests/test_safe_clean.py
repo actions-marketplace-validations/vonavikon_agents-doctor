@@ -44,8 +44,8 @@ def force_rmtree(path):
 
 def git(repo, *args):
     """git in a fixture repo; commit gets a per-command local identity."""
-    args = ['-c', 'user.email=t@example.com', '-c', 'user.name=T'] + list(args) \
-        if args[:1] == ['commit'] else list(args)
+    args = (['-c', 'user.email=t@example.com', '-c', 'user.name=T'] + list(args)
+            if args and args[0] == 'commit' else list(args))
     subprocess.run(['git', '-C', str(repo)] + args,
                    check=True, capture_output=True)
 
