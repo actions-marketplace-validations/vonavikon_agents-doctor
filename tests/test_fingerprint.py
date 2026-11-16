@@ -112,6 +112,10 @@ class FingerprintKeyTest(unittest.TestCase):
         self.assertTrue(
             first.stdout.startswith('key: ok, fingerprint sample: hmac256:'),
             first.stdout)
+        # stat between subprocess calls: forces the Windows filesystem
+        # cache to acknowledge the file written by the first process
+        self.assertTrue(key.is_file(), 'key file must exist after first run')
+        self.assertGreaterEqual(key.stat().st_size, 16)
         second = self.run_check(key)
         self.assertEqual(second.returncode, 0)
         self.assertEqual(first.stdout, second.stdout)

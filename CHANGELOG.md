@@ -4,7 +4,7 @@ All notable changes to workspace-audit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
-## [0.7.0] - 2026-11-16 (unreleased candidate)
+## [0.7.0] - 2026-11-16
 
 ### Security
 
