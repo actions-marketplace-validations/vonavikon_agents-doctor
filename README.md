@@ -11,6 +11,14 @@ Two layers:
 
 The scanner only reads. Deletions and edits always stay with the human.
 
+## Security model
+
+- Secret detection and redaction live in one module, `secret_scanner.py`: raw values never leave it. Every finding carries only the file, line, kind, confidence, a rule-derived mask and a salted one-way fingerprint.
+- Worktree files, staged changes, tracked files and (with `--deep`) git history all go through the same redaction path. A regression suite plants canary secrets and asserts they appear in no artifact: report JSON, stdout or stderr.
+- Filesystem boundary: file and directory symlinks pointing outside the workspace root are skipped and counted in `stats.skipped_symlinks_outside`.
+- Git runs with `GIT_OPTIONAL_LOCKS=0`: the audit cannot refresh or modify the index.
+- The scanner writes exactly one file: the report path passed via `--out`.
+
 ## What it checks
 
 | Block | What it finds |
@@ -20,7 +28,7 @@ The scanner only reads. Deletions and edits always stay with the human.
 | Context tax | weight of session files: project file against a 16 KB benchmark, memory index against 24.4 KB / 200 lines |
 | Repos and folders | folder classification; remote is external hosting or self-hosted; credentials in URLs; second checkout of the same repo; nested repos |
 | Sync mechanics | `.git/hooks` flags (`add -A`, push, secret scan), sync commits in the last 30 days, `.gitignore` |
-| Secrets | tokens and passwords in files, in the git index, in remote URLs (values masked); git history with `--deep` |
+| Secrets | tokens, passwords, AWS-style keys and private-key headers in files, in the git index, in remote URLs (values redacted to a mask and a salted fingerprint); git history with `--deep` |
 | Skills | descriptions over 1024 chars (the skill will not load), descriptions without triggers, drifted copies |
 | Hygiene | name-based junk (final/version/copy/old/temp, logs, drafts, `node_modules` and other build dirs, in English and Russian), hash-proven duplicates, files over 5 MB, empty folders |
 
@@ -94,6 +102,14 @@ cd qa && python eval.py
 
 Three scenario fixtures with expected results locked in `expected.json` before the run; the runner compares the scanner's actual JSON against the expected one and writes a report. Current result: 71/71. Latest report: `qa/QA-EVAL-*.md`.
 
+The deterministic core also has a unit and security-regression suite:
+
+```
+python -m unittest discover -s tests
+```
+
+23 tests, including canary-secrets redaction across worktree/staged/tracked/history artifacts and a read-only git-index check.
+
 ## Methodology
 
 The split is deterministic scan first, LLM interpretation second: the scanner produces facts, and the language model only judges which facts are findings. This mirrors how industry audit tools place the LLM strictly above findings rather than in the collection path, and it follows context-file hygiene research showing that instruction weight and staleness directly affect agent behavior. Details: [docs/methodology.md](docs/methodology.md).
@@ -105,6 +121,7 @@ The split is deterministic scan first, LLM interpretation second: the scanner pr
 - Remote classification knows only external hosting vs self-hosted; it does not know your organization.
 - Skill versions in the CLI plugin cache are not treated as drift: the cache is managed by the CLI.
 - Junk heuristics are name-based and bilingual (en/ru); tune expectations accordingly.
+- The symlink boundary regression test skips on systems that forbid creating symlinks (Windows without Developer Mode); the boundary guard itself is always active.
 
 ## License
 

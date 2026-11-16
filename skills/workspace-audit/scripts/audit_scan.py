@@ -23,13 +23,17 @@ from pathlib import Path
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+# secret detection and redaction live in one module: raw values never leave it
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import secret_scanner as secscan  # noqa: E402
+
 # --- thresholds and heuristics from the audit protocol ------------------------
 PROJECT_BENCH = 16 * 1024        # project instruction file: up to ~16 KB is achievable
 MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
 MEMORY_LINE_LIMIT = 200          # memory loads up to 200 lines or 25 KB, whichever comes first
 CHAIN_BUDGET = 32768             # Codex budget for the root + nested AGENTS.md chain
 SKILL_DESC_LIMIT = 1024          # Z Code skill description limit
-RULES_VERSION = '0.2.1'          # rule set version, goes into the report
+RULES_VERSION = '0.3.0'          # rule set version, goes into the report
 HARNESS_STALE_DAYS = 90          # older: harness counts as abandoned
 HARNESS_FRESH_DAYS = 30          # newer: active
 
@@ -55,19 +59,8 @@ DUP_MAX_BYTES = 50 * 1024 * 1024
 TEXT_EXTS = {'.json', '.md', '.yml', '.yaml', '.toml', '.env', '.txt',
              '.py', '.js', '.ts', '.cfg', '.ini', '.sh'}
 SECRET_FILENAMES = {'.mcp.json', '.env', 'settings.json'}
-GIT_SECRET_RE = ("sk-[A-Za-z0-9_-]{16,}|Bearer [A-Za-z0-9._-]{20,}"
-                 "|api[_-]?key[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"
-                 "|password[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"
-                 "|token[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}")
-
-SECRET_PATTERNS = [
-    ('sk-token', re.compile(r'sk-[A-Za-z0-9_-]{16,}')),
-    # no letter/digit before the keyword (catches DB_PASSWORD, skips
-    # PASSWORDX); the value must be a quoted literal
-    ('secret literal', re.compile(
-        r'(?i)(?<![a-z0-9])(api[_-]?key|apikey|password|secret|token|authorization)'
-        r'["\']?\s*[:=]\s*["\'][^"\']{8,}')),
-]
+# key-like names are scanned for secrets even without a text extension
+NAME_SECRET_RX = re.compile(r'(id_rsa|id_dsa|id_ecdsa|id_ed25519|\.pem$|\.key$|^id_)', re.I)
 
 JUNK_FILE_RULES = [
     (re.compile(r'^temp', re.I), 'temp file'),
@@ -104,8 +97,10 @@ JUNK_DIR_RULES = [
 # --- shared helpers -----------------------------------------------------------
 
 def run_git(p, *args):
+    # GIT_OPTIONAL_LOCKS=0 keeps git from refreshing the index: read-only
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS='0')
     r = subprocess.run(['git', '-C', str(p), *args], capture_output=True,
-                       text=True, encoding='utf-8', errors='replace')
+                       text=True, encoding='utf-8', errors='replace', env=env)
     return r.returncode, r.stdout
 
 
@@ -127,8 +122,11 @@ def subtree(p):
     size = count = 0
     for dp, _dns, fns in os.walk(p):
         for fn in fns:
+            f = Path(dp) / fn
+            if f.is_symlink():
+                continue
             try:
-                size += (Path(dp) / fn).stat().st_size
+                size += f.stat().st_size
                 count += 1
             except OSError:
                 pass
@@ -215,19 +213,13 @@ def repo_extra(p, gi, deep=False):
     rc, out = run_git(p, 'log', '--oneline', '--since', '30 days ago', '--grep', 'sync')
     ex['sync_commits_last30'] = len([l for l in out.splitlines() if l.strip()])
 
-    rc, out = run_git(p, 'grep', '--cached', '-i', '-nE', GIT_SECRET_RE)
+    rc, out = run_git(p, 'grep', '--cached', '-i', '-nE', secscan.GIT_GREP_RE)
     if rc == 0:
-        ex['tracked_secrets'] = [l[:120] for l in out.splitlines() if l.strip()][:10]
+        ex['tracked_secrets'] = secscan.scan_git_grep_output(out)[:10]
 
     if deep:
         rc, out = run_git(p, 'log', '-p', '--max-count=300')
-        hits = []
-        for line in out.splitlines():
-            if any(rx.search(line) for _k, rx in SECRET_PATTERNS):
-                hits.append(line[:120])
-                if len(hits) >= 10:
-                    break
-        ex['history_secrets'] = hits
+        ex['history_secrets'] = secscan.scan_diff_output(out)
     return ex
 
 
@@ -462,7 +454,8 @@ def build_gates(rep):
             continue
         if ex['credentials_in_remote']:
             sec_ev.append(f"{t['name']}: credentials in remote URL")
-        sec_ev += [f"{t['name']} (staged): {l[:80]}" for l in ex['tracked_secrets']]
+        sec_ev += [f"{t['name']} (staged): {e['file']}:{e['line']} {e['kind']}"
+                   for e in ex['tracked_secrets']]
     gates.append({'n': 6, 'gate': 'No keys in tracked files or URLs; secret scan in the commit chain',
                   'status': 'FAIL' if sec_ev else 'PASS', 'evidence': sec_ev})
     skill_ev = []
@@ -555,7 +548,7 @@ def chain_budget(root):
 
 def scan(root, home, deep=False):
     t0 = time.monotonic()
-    rep = {'root': str(root), 'home': str(home),
+    rep = {'schema_version': '1.0', 'root': str(root), 'home': str(home),
            'generated_at': datetime.now().astimezone().isoformat(timespec='seconds'),
            'top_level': [], 'dup_checkouts': {}, 'context_files': [], 'context_drift': [],
            'context_tax': {}, 'harness': {}, 'skills': {},
@@ -565,12 +558,21 @@ def scan(root, home, deep=False):
            'duplicates': [], 'large_files': [], 'secrets': [], 'gates': [], 'stats': {}}
     per_top, total_files, hashes = {}, 0, {}
     seen_secret_lines = set()
+    skipped_links = 0
+
+    def inside_root(target):
+        return target == root or root in target.parents
 
     for dirpath, dirnames, filenames in os.walk(root):
         keep = []
         for dn in dirnames:
             full = Path(dirpath) / dn
             if dn == '.git':
+                continue
+            if full.is_symlink():
+                # never descend into or measure a symlinked directory:
+                # it may point outside the workspace
+                skipped_links += 1
                 continue
             reason = f'build artifact ({dn})' if dn in BUILD_DIRS else dir_junk_reason(dn)
             if reason:
@@ -590,6 +592,15 @@ def scan(root, home, deep=False):
 
         for fn in filenames:
             f = Path(dirpath) / fn
+            if f.is_symlink():
+                # boundary guard: a file symlink may point outside the root
+                try:
+                    if not inside_root(f.resolve()):
+                        skipped_links += 1
+                        continue
+                except OSError:
+                    skipped_links += 1
+                    continue
             try:
                 st = f.stat()
             except OSError:
@@ -608,18 +619,18 @@ def scan(root, home, deep=False):
             if DUP_MIN_BYTES <= st.st_size <= DUP_MAX_BYTES:
                 h = hashlib.md5(f.read_bytes()).hexdigest()
                 hashes.setdefault(h, []).append(rel)
-            if (fn in SECRET_FILENAMES or f.suffix.lower() in TEXT_EXTS) and st.st_size < 1024 * 1024:
+            if (fn in SECRET_FILENAMES or NAME_SECRET_RX.search(fn)
+                    or f.suffix.lower() in TEXT_EXTS) and st.st_size < 1024 * 1024:
                 text = f.read_text(encoding='utf-8', errors='replace')
-                for i, line in enumerate(text.splitlines(), 1):
-                    if (rel, i) in seen_secret_lines:
+                for hit in secscan.scan_text(rel, text):
+                    if (rel, hit['line']) in seen_secret_lines:
                         continue
-                    for kind, rx in SECRET_PATTERNS:
-                        m = rx.search(line)
-                        if m:
-                            seen_secret_lines.add((rel, i))
-                            rep['secrets'].append({'path': rel, 'line': i, 'kind': kind,
-                                                   'preview': m.group(0)[:6] + '...'})
-                            break
+                    seen_secret_lines.add((rel, hit['line']))
+                    rep['secrets'].append({'path': rel, 'line': hit['line'],
+                                           'kind': hit['kind'],
+                                           'mask': hit['mask'],
+                                           'fingerprint': hit['fingerprint'],
+                                           'confidence': hit['confidence']})
 
     for h, paths in hashes.items():
         if len(paths) > 1:
@@ -674,6 +685,7 @@ def scan(root, home, deep=False):
     rep['gates'] = build_gates(rep)
     rep['stats'] = {'total_files': total_files,
                     'total_size_bytes': sum(per_top.values()),
+                    'skipped_symlinks_outside': skipped_links,
                     'duration_sec': round(time.monotonic() - t0, 2)}
     return rep
 
@@ -713,6 +725,9 @@ def main():
           f"junk files {len(j['files'])}, junk dirs {len(j['dirs'])}, "
           f"empty dirs {len(j['empty_dirs'])}, duplicate groups {len(rep['duplicates'])}")
     print(f"fingerprinted findings: {len(rep['findings'])} (rules {rep['rules_version']})")
+    if rep['stats'].get('skipped_symlinks_outside'):
+        print(f"skipped symlinks pointing outside the root: "
+              f"{rep['stats']['skipped_symlinks_outside']}")
     if 'diff' in rep:
         print(f"baseline: {len(rep['diff']['new'])} new, {len(rep['diff']['resolved'])} resolved")
     print('full report: ' + a.out)
