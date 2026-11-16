@@ -1,0 +1,12 @@
+{
+  "name": "workspace-audit",
+  "owner": { "name": "vonavikon" },
+  "plugins": [
+    {
+      "name": "workspace-audit",
+      "source": "./",
+      "description": "Agent workspace audit: deterministic scanner plus a skill-generated gated report.",
+      "version": "0.2.1"
+    }
+  ]
+}

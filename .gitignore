@@ -1,0 +1,6 @@
+qa/scenarios/*/run/
+demo/employee-workspace/
+demo/fake-home/
+demo-scan.json
+__pycache__/
+*.pyc
