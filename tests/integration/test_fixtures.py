@@ -312,9 +312,17 @@ class FixtureIntegrationTest(unittest.TestCase):
         st = gate_statuses(rep)
         self.assertNotEqual(st['G6'], 'fail',
                             'unreadable secret must not fail G6')
-        text = json.dumps(rep['findings_detailed']).lower()
-        self.assertNotIn('locked', text,
-                         'a finding references the unreadable dir')
+        # the locked dir itself may appear as a structural observation
+        # (an unowned top-level folder); its CONTENT must never surface:
+        # no secret-category finding may reference it and the planted
+        # value must be absent from the whole report
+        secret_findings = json.dumps([f for f in rep['findings_detailed']
+                                      if f.get('category') == 'secrets']).lower()
+        self.assertNotIn('locked', secret_findings,
+                         'a secrets finding references the unreadable dir')
+        self.assertNotIn('sk-demo-locked-0000000000',
+                         json.dumps(rep).lower(),
+                         'the planted unreadable secret leaked into the report')
 
     # --- F11 -----------------------------------------------------------------
 
