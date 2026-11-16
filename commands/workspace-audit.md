@@ -1,5 +1,5 @@
 ---
-description: Run a workspace audit (full, or focused: security, structure, agents; also compare, explain, fix)
+description: Run a workspace audit (full or focused: security, structure, agents; also human report, safe clean, compare, explain, fix)
 ---
 
 # /workspace-audit
@@ -8,6 +8,28 @@ Parse `$ARGUMENTS` and route to one of the modes below. When several
 folders could be the audit root, ask the user first. The scanner is
 read-only; secrets stay masked in every output; nothing is ever deleted in
 bulk.
+
+## `human` (for non-technical readers)
+
+Generate the plain-language value report from the last scan (or run a fresh
+one first): `python skills/workspace-audit/scripts/report_human.py <scan.json> --lang en|ru [--after <scan2.json>]`.
+It answers, in human words: what is wrong, what it costs (extra tokens every
+session with the assumption printed, disk space, secrets left in plain
+sight), and — after a cleanup, with `--after` — what got better. Post a
+2-3 sentence chat summary from its "short version" section; offer `safe
+clean` as the next step for users who want action without reading reports.
+
+## `clean` (safe cleanup for non-technical users)
+
+Run the guided cleanup wizard: `python skills/workspace-audit/scripts/safe_clean.py <root>`.
+Walk the user through it. Rules the agent must keep: show the preview
+categories and sizes in plain words; the fixed "will NOT touch" line is
+non-negotiable (tracked files, files with keys, anything the audit is
+unsure about); confirmation is the user typing YES themselves — never
+confirm on their behalf, never pass --yes; everything movable goes to the
+`.workspace-audit-trash` folder and can be restored; after cleanup offer
+to re-run the audit and produce the human before/after report with
+`--after`.
 
 ## no arguments or `full`
 

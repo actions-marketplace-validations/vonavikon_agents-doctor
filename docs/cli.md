@@ -146,3 +146,9 @@ cd qa && python eval.py
 Builds the three scenario fixtures, runs the scanner, compares actual JSON
 against locked expectations and writes `qa/QA-EVAL-<date>.md`. Exit 0 when
 every check passes, 1 otherwise.
+
+## Human layer
+
+- `python skills/workspace-audit/scripts/report_human.py <scan.json> [--lang en|ru] [--sessions 10] [--after <scan2.json>] [--out HUMAN-REPORT.md]` — plain-language value report; `--after` produces the before/after story.
+- `python skills/workspace-audit/scripts/safe_clean.py <root> [--home H] [--yes] [--include-cautious] [--max-bytes N]` — guided safe cleanup; interactive typed-YES confirmation, trash-first, exit 0/1/2/3 (see `--help`).
+- `python tools/gen_sample_human_report.py` — regenerates the EN/RU sample reports from the chaos fixture.

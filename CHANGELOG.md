@@ -4,6 +4,28 @@ All notable changes to workspace-audit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [0.6.0] - 2026-11-16
+
+The human layer: value-first reporting and safe cleanup.
+
+### Added
+
+- `report_human.py`: plain-language report (EN/RU) — what is wrong in human
+  words, what it costs (token ranges with printed assumptions, disk value,
+  secrets in plain sight), and a before/after story with `--after`.
+- `safe_clean.py`: guided cleanup for non-technical users — plain-word
+  preview, typed YES, trash-first recovery, hard never-touch rules.
+- Research note `docs/research-human-layer.md` with applied/declined
+  findings and sources.
+- Sample human reports (EN/RU), `/workspace-audit human` and `clean`
+  command routing, CLI/docs updates.
+
+### Changed
+
+- Safe-cleanup guards from the research: node_modules without a sibling
+  lockfile is cautious-tier; build dirs modified within 7 days are skipped
+  as active installs.
+
 ## [0.5.0] - 2026-11-16
 
 Stages 4 and 5 of the production-readiness spec: product experience and

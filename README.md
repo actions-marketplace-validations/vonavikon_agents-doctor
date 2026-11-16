@@ -106,6 +106,20 @@ python skills/workspace-audit/scripts/workspace_audit.py --help
 
 `sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `workspace_audit.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, and `fix <fid>` — plan-only by default.
 
+For non-technical readers there is a plain-language value report (English and Russian): what is wrong in human words, what it costs (extra tokens every session with the assumption printed, disk space, secrets in plain sight), and — with a second scan after cleanup — what got better. Samples: [EN](docs/sample-human-report.md), [RU](docs/sample-human-report.ru.md).
+
+```
+python skills/workspace-audit/scripts/report_human.py <scan.json> --lang ru [--after <scan2.json>]
+```
+
+And for people who do not want to read reports at all, the safe-cleanup wizard tidies up with near-zero risk: a plain-word preview, a typed YES, everything recoverable:
+
+```
+python skills/workspace-audit/scripts/safe_clean.py <root>
+```
+
+It only touches regenerable caches, empty folders and confirmed junk (aged, untracked, unreferenced, lockfile-backed `node_modules` only); build dirs modified within the last 7 days are skipped as active installs; tracked files, files with keys and anything uncertain are never touched; every movable item goes to `.workspace-audit-trash/` first. Design rationale and sources: [docs/research-human-layer.md](docs/research-human-layer.md).
+
 Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix, requires an explicit `yes` before `--apply` touches anything, and re-audits afterwards. V1 supports three fix types: removing empty directories, creating a `.gitignore` from the template, and moving confirmed junk into `.workspace-audit-trash/`.
 
 ## Documentation
