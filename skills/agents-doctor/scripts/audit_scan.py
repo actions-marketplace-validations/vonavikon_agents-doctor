@@ -30,6 +30,7 @@ import enrich  # noqa: E402
 import gates as gates_engine  # noqa: E402
 import sanitize_url  # noqa: E402
 import history_scan  # noqa: E402
+import content_quality  # noqa: E402
 from fingerprint import FingerprintKeyError  # noqa: E402
 
 def _exists(p):
@@ -759,6 +760,22 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
             rep['context_files'].extend(entries)
             if drift:
                 rep['context_drift'].append(drift)
+
+    # content quality of project instruction files: are the words inside
+    # worth the context they cost? Analyzed for project files only; home
+    # files are small by design and cost nothing here.
+    rep['content_quality'] = {}
+    for e in rep['context_files']:
+        if e.get('origin') != 'project':
+            continue
+        path = root / e['path']
+        if path.is_file():
+            try:
+                text = path.read_text(encoding='utf-8', errors='replace')
+                rep['content_quality'][e['path']] = content_quality.analyze_content(
+                    text, e['path'])
+            except OSError:
+                pass
 
     rep['harness'] = harness_report(home, root)
     # recursive, honest harness activity (stage 2): overrides the shallow

@@ -428,6 +428,82 @@ def _g3(facts, run):
         run.rule('instruction-size', 'warn' if big else 'pass',
                  ['instruction files over benchmark: %d' % len(big)])
 
+    cq = facts.get('content_quality')
+    if cq is None:
+        # section absent (facts from an older scanner or a fabricated
+        # report): the check did not run and records no rule, so the
+        # verdicts of the other G3 rules stand unchanged
+        pass
+    elif not cq:
+        run.rule('content-quality', 'not_applicable',
+                 ['no project instruction files to analyze'])
+    else:
+        # collect worst scores across all project instruction files
+        worst_ratio = 1.0
+        total_generic = 0
+        total_contradictions = 0
+        total_redundant = 0
+        for path, analysis in cq.items():
+            worst_ratio = min(worst_ratio, analysis.get('signal_ratio', 1.0))
+            total_generic += len(analysis.get('generic_phrases', []))
+            total_contradictions += len(analysis.get('contradictions', []))
+            total_redundant += len(analysis.get('redundant_pairs', []))
+
+        # contradictions are hard failures
+        for path, analysis in cq.items():
+            for c in analysis.get('contradictions', []):
+                run.finding(
+                    'RUL', 'high', 'fail',
+                    'Contradictory instructions in %s' % path,
+                    'One line says "%s" while another says "%s" — the agent '
+                    'gets conflicting rules.'
+                    % (c.get('line_a', '')[:60], c.get('line_b', '')[:60]),
+                    [{'file': path, 'line_a': c.get('line_a'),
+                      'line_b': c.get('line_b')}],
+                    0.9, 'Remove one of the contradictory lines or reconcile '
+                         'them into one rule.')
+
+        # generic phrases are warnings
+        if total_generic > 0:
+            run.finding(
+                'RUL', 'low', 'warn',
+                '%d generic phrases across instruction files' % total_generic,
+                'These lines could apply to any project (e.g. "write clean '
+                'code", "follow best practices") — the agent already knows '
+                'this. They waste context budget.',
+                [{'count': total_generic}], 0.8,
+                'Remove generic advice; keep only rules specific to THIS project.')
+
+        # low signal ratio is a warning
+        if worst_ratio < 0.3:
+            run.finding(
+                'RUL', 'medium', 'warn',
+                'Instruction file is mostly noise (signal ratio %.0f%%)'
+                % (worst_ratio * 100),
+                'Less than 30% of the non-blank lines are actionable '
+                'instructions. The rest is narrative, descriptions, or filler.',
+                [{'ratio': round(worst_ratio, 2)}], 0.85,
+                'Trim to actionable rules: what to run, what to avoid, '
+                'where files are.')
+
+        # redundancy is info
+        if total_redundant > 0:
+            run.finding(
+                'RUL', 'info', 'warn',
+                '%d redundant rule pairs' % total_redundant,
+                'Near-duplicate instructions were found; each costs tokens '
+                'in every session.',
+                [{'count': total_redundant}], 0.7,
+                'Merge duplicate rules into single, precise instructions.')
+
+        status = 'fail' if total_contradictions > 0 else (
+            'warn' if total_generic > 5 or worst_ratio < 0.3 else 'pass')
+        run.rule('content-quality', status,
+                 ['files analyzed: %d, worst signal ratio: %.2f, '
+                  'generic phrases: %d, contradictions: %d, redundant pairs: %d'
+                  % (len(cq), worst_ratio, total_generic, total_contradictions,
+                     total_redundant)])
+
     drift = facts.get('context_drift')
     if drift is None:
         _missing(run, 'RUL', 'Rule pair drift not verified', 'context_drift')

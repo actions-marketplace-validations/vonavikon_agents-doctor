@@ -95,9 +95,12 @@ def f01_clean(base):
     root = base / 'root'
     app = root / 'app'
     _write(app / 'README.md', '# App\n\nDemo service.\n')
+    _write(app / 'package.json', '{"name":"app","scripts":{"test":"jest"}}\n')
     _write(app / 'AGENTS.md',
            '# App instructions\n\n'
-           'Build steps live in [README](README.md).\n'
+           'Always run `npm test` before committing.\n'
+           'Never place test files next to source modules.\n'
+           'Prefer named exports over default exports.\n'
            'Keep the module count small.\n')
     _write(app / '.gitignore', '__pycache__/\n*.pyc\n')
     _write(app / '.zcode' / 'config.json', '{"enabled": true}\n')

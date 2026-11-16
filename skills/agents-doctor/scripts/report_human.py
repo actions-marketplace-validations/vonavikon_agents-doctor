@@ -130,6 +130,12 @@ STRINGS = {
         'plain_gov': 'Rules are kept for a tool nobody has used in months',
         'plain_health': 'Unused files and old copies are piling up in '
                         'the workspace',
+        'plain_cq_noise': "Your instruction files are only {pct}% actionable — "
+                          "the rest is filler that wastes the agent's attention",
+        'plain_cq_generic': '{n} lines are generic advice any project could '
+                            'have (the agent already knows this)',
+        'plain_cq_contra': 'Some instructions contradict each other — the '
+                           'agent gets conflicting rules',
         'h_better': 'What gets better after cleanup',
         'better_gates': 'Red checks went from {f1} to {f2}, yellow from '
                         '{w1} to {w2}.',
@@ -227,6 +233,13 @@ STRINGS = {
                      'давно не пользуются',
         'plain_health': 'В рабочей папке копятся неиспользуемые файлы '
                         'и старые копии',
+        'plain_cq_noise': 'Только {pct}% ваших инструкций содержат '
+                          'конкретные правила — остальное наполняет '
+                          'контекст без пользы',
+        'plain_cq_generic': '{n} строк — общие советы, которые подходят '
+                            'любому проекту (агент это и так знает)',
+        'plain_cq_contra': 'Некоторые инструкции противоречат друг другу — '
+                           'агент получает взаимоисключающие правила',
         'h_better': 'Что станет лучше после уборки',
         'better_gates': 'Красных проверок стало {f2} вместо {f1}, жёлтых — '
                         '{w2} вместо {w1}.',
@@ -607,6 +620,19 @@ def _wrong_section(rep, lang):
     for f in open_f[:MAX_WRONG_BULLETS]:
         lines.append('- ' + plain_sentence(rep, f, lang)
                      + ' (' + str(f.get('fid', '?')) + ')')
+    cq = rep.get('content_quality') or {}
+    if cq:
+        worst = min((a.get('signal_ratio', 1.0) for a in cq.values()),
+                    default=1.0)
+        generic = sum(a.get('generic_count', 0) for a in cq.values())
+        contra = sum(len(a.get('contradictions') or []) for a in cq.values())
+        if worst < 0.5:
+            lines.append('- ' + s['plain_cq_noise'].format(
+                pct=int(round(worst * 100))))
+        if generic > 0:
+            lines.append('- ' + s['plain_cq_generic'].format(n=generic))
+        if contra > 0:
+            lines.append('- ' + s['plain_cq_contra'])
     return lines
 
 

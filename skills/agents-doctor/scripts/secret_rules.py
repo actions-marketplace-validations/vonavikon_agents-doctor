@@ -115,16 +115,23 @@ def find_rule(line):
 
     Rules are tried in RULES order (specific before generic). For the
     literal rules, digit-only quoted values are skipped as too weak;
-    other matches of the same rule on the same line are still
-    considered.
+    values containing ${...} template placeholders are skipped as
+    configuration templates, not live secrets.
     """
     for rule in RULES:
         if rule['id'] in _WEAK_VALUE_RULES:
             for match in rule['py'].finditer(line):
-                if not _is_weak_literal(match):
-                    return rule
-        elif rule['py'].search(line) is not None:
-            return rule
+                if _is_weak_literal(match):
+                    continue
+                if '${' in match.group(0):
+                    continue  # template placeholder, not a real secret
+                return rule
+        else:
+            match = rule['py'].search(line)
+            if match is not None:
+                if '${' in match.group(0):
+                    continue  # e.g. "Bearer ${API_KEY}" in .example.json
+                return rule
     return None
 
 

@@ -25,7 +25,7 @@ Severity (impact when a check does not pass):
 |---|---|
 | `critical` | Exposed, staged or tracked secrets; credentials in remote URLs. |
 | `high` | Structural breakage: drifted instruction pairs, unparseable skill frontmatter, over-limit descriptions, diverged skill copies, broken configs. |
-| `medium` | Problems that corrupt decisions: dead references, nested repos, heavy unowned dirs, oversized tracked files, junk over the fail line. |
+| `medium` | Problems that corrupt decisions: dead references; content quality (signal-to-noise, generic phrases, contradictions), nested repos, heavy unowned dirs, oversized tracked files, junk over the fail line. |
 | `low` | Hygiene: uncommitted work, missing .gitignore, loose folders, boilerplate. |
 | `info` | Observations: a few empty dirs, occasional harnesses. |
 
@@ -69,7 +69,7 @@ warn, not a pass: nobody confirmed the workspace really has none.
 
 | Condition | When |
 |---|---|
-| pass | No dead references, no drifted pairs, no boilerplate, files within budgets. |
+| pass | No dead references; content quality (signal-to-noise, generic phrases, contradictions), no drifted pairs, no boilerplate, files within budgets. |
 | fail | Dead links, paths or commands in instruction files; a drifted AGENTS.md/CLAUDE.md pair. |
 | warn | Generic boilerplate in auto-loaded context; an instruction file over 16 KB; the AGENTS.md chain over 32 768 bytes (the Codex truncation budget). |
 
