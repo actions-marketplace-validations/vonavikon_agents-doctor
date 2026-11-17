@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-r"""Corporate policy engine for agents-doctor (TZ v2.1.0).
+r"""Corporate policy engine for agents-doctor (TZ v2.1.0, enforcement v2).
 
 A policy is a YAML file that says what a workspace must look like; the
 engine checks a finished audit (scan.json) plus the workspace files
 against it and writes a compliance report. The audit itself is unchanged:
 policies only read facts, they never rescan.
 
-    version: 1
+    version: 2
 
     policy:
+      name: enterprise-baseline
+      enforcement:            # v2: CI enforcement (absent = v1 behaviour)
+        enabled: true
+        default_action: warn  # domains without an explicit block_on_failure
+        unknown_action: warn  # rules the scan could not check
       secrets:
         severity: critical
+        block_on_failure: true   # v2: actually blocks (see exit codes)
+        block_above: high        # v2: only violations at/above this level
       mcp:
         allowlist:
           - approved-server
@@ -23,6 +30,12 @@ policies only read facts, they never rescan.
       content:
         ban_patterns:
           - 'task\$'
+      harness_versions:
+        required:
+          claude_code: '>=2.1'
+          codex: '<2'
+      required_skills:
+        - gramax
 
     custom_rules:
       - id: POL-CUSTOM-001
@@ -33,8 +46,9 @@ policies only read facts, they never rescan.
 
 Every domain is optional: an absent domain leaves its rule not active.
 Several files layer: later files win per domain, conflicting severities
-resolve to the strictest with a warning. Rule exceptions live in the
-workspace .agents-doctor.toml:
+resolve to the strictest with a warning. Enforcement settings layer on
+top of every file: enabled is OR, actions take the stricter value with a
+warning. Rule exceptions live in the workspace .agents-doctor.toml:
 
     [policy]
     exceptions = { POL-MCP-ALLOWLIST = "local dev stand" }
@@ -50,6 +64,16 @@ inline lists, quoted scalars, comments). A file that does not parse
 raises PolicyError with the file name and line -- never a partial
 policy. Unknown domains and fields are reported as warnings because
 unknown must not read as safe.
+
+Version 1 files (no `version` field or `version: 1`) keep working
+exactly as before: block_on_failure stays informational, the policy
+subcommand exits 0 once its report is written. With enforcement
+enabled (version 2) the report summary carries an `enforcement`
+block {enabled, action_taken, exit_code, blocking_rules} and the
+caller is expected to honour the exit code: 0 pass or enforcement
+off, 1 a blocking rule fired, 4 strict enforcement with unchecked
+(unknown) rules. Configuration and scan errors (2, 3) are raised
+before any of this -- see agents_doctor.cmd_policy.
 
 Usage:
     from policies import evaluate_policies, render_markdown, PolicyError
@@ -74,7 +98,7 @@ try:
 except ImportError:
     tomllib = None
 
-POLICY_SCHEMA_VERSION = '1.0'
+POLICY_SCHEMA_VERSION = '1.1'
 
 # policy severity -> (finding severity, rule/violation status)
 SEVERITY_MAP = {
@@ -85,8 +109,15 @@ SEVERITY_MAP = {
 }
 SEVERITY_RANK = {'info': 0, 'warning': 1, 'error': 2, 'critical': 3}
 
+# finding-severity ladder for enforcement (block_above lives here, not
+# in the policy severity scale: 'high' is a finding severity)
+BLOCK_SEVERITY_RANK = {'low': 0, 'medium': 1, 'high': 2, 'critical': 3}
+
+ENFORCEMENT_ACTIONS = ('block', 'warn')
+
 # domain -> known fields; 'severity' is known everywhere, the rest is
-# the domain's own knob
+# the domain's own knob. block_on_failure/block_above are v2 fields:
+# v1 files only know block_on_failure on secrets (informational there).
 KNOWN_DOMAINS = {
     'secrets': ('severity', 'block_on_failure'),
     'mcp': ('severity', 'allowlist'),
@@ -94,13 +125,18 @@ KNOWN_DOMAINS = {
     'git': ('severity', 'prevent_secret_commits'),
     'permissions': ('severity', 'forbid_wildcard'),
     'content': ('severity', 'ban_patterns'),
+    'harness_versions': ('severity', 'required'),
+    'required_skills': (),   # list-valued domain, no mapping fields
 }
+# fields every mapping domain additionally accepts in version 2 files
+V2_DOMAIN_FIELDS = ('block_on_failure', 'block_above')
 DOMAIN_ORDER = ('secrets', 'mcp', 'instructions', 'git', 'permissions',
-                'content')
+                'content', 'harness_versions', 'required_skills')
 
 # metadata keys of the policy mapping itself (the TZ format carries a
-# name and a description there); not domains, never active
-POLICY_META = ('name', 'description')
+# name and a description there); not domains, never active. enforcement
+# is handled separately and only means something in v2 files.
+POLICY_META = ('name', 'description', 'enforcement')
 
 DEFAULT_DOMAIN_SEVERITY = {
     'secrets': 'critical',
@@ -109,6 +145,8 @@ DEFAULT_DOMAIN_SEVERITY = {
     'git': 'critical',
     'permissions': 'error',
     'content': 'error',
+    'harness_versions': 'error',
+    'required_skills': 'error',
 }
 
 RULE_IDS = {
@@ -118,6 +156,8 @@ RULE_IDS = {
     'git': 'POL-GIT-SECRET-COMMITS',
     'permissions': 'POL-PERMISSIONS-WILDCARD',
     'content': 'POL-CONTENT-BAN-PATTERNS',
+    'harness_versions': 'POL-HARNESS-VERSIONS',
+    'required_skills': 'POL-REQUIRED-SKILLS',
 }
 RULE_TEXTS = {
     'secrets': 'no secrets with fail status in the scan (rep["secrets"])',
@@ -126,6 +166,9 @@ RULE_TEXTS = {
     'git': 'no tracked secrets and a secret-scan hook in every repository',
     'permissions': 'no wildcard or dangerous permission findings in the scan',
     'content': 'no banned pattern in instruction and config files',
+    'harness_versions': 'every required harness version is inside its '
+                        'allowed range',
+    'required_skills': 'every required skill is installed',
 }
 
 PERMISSION_CHECK_IDS = ('CLAUDE_SETTINGS_PERMISSIONS_WILDCARD',
@@ -137,6 +180,59 @@ SECRET_SCAN_HOOKS = ('pre-commit', 'pre-push')
 
 # files the content checks read (root-level only), capped per file
 CONTENT_FILE_CAP = 256 * 1024
+
+# harness version ranges: one operator plus a semver-like string,
+# compared component-wise numerically ('2.1' == '2.1.0', '2.1' < '2.1.1')
+RANGE_OPERATORS = ('>=', '<=', '==', '>', '<')
+
+
+def _version_tuple(text):
+    """'2.1.0-beta' -> (2, 1, 0): the leading digits of every dot
+    component, 0 when a component has none. Numbers only -- suffixes
+    like -beta are ignored rather than guessed at."""
+    parts = []
+    for comp in str(text).split('.'):
+        m = re.match(r'\s*(\d+)', comp)
+        parts.append(int(m.group(1)) if m else 0)
+    return tuple(parts)
+
+
+def _version_cmp(a, b):
+    """-1/0/1 comparing two version tuples; missing components are 0."""
+    la, lb = list(a), list(b)
+    width = max(len(la), len(lb))
+    la += [0] * (width - len(la))
+    lb += [0] * (width - len(lb))
+    for x, y in zip(la, lb):
+        if x != y:
+            return -1 if x < y else 1
+    return 0
+
+
+def _parse_version_range(spec):
+    """'>=2.1' -> ('>=', (2, 1)); None when the spec is malformed."""
+    if not isinstance(spec, str):
+        return None
+    s = spec.strip()
+    for op in RANGE_OPERATORS:
+        if s.startswith(op):
+            rest = s[len(op):].strip()
+            if rest:
+                return (op, _version_tuple(rest))
+            return None
+    return None
+
+
+def _version_in_range(version, parsed):
+    op, limit = parsed
+    cmp = _version_cmp(_version_tuple(version), limit)
+    return {
+        '>=': cmp >= 0,
+        '<=': cmp <= 0,
+        '==': cmp == 0,
+        '>': cmp > 0,
+        '<': cmp < 0,
+    }[op]
 
 
 class PolicyError(Exception):
@@ -394,7 +490,7 @@ def parse_policy_file(path):
         raise PolicyError(p.name, exc.lineno, str(exc))
 
 
-def _unknown_warnings(data, fname, warnings):
+def _unknown_warnings(data, fname, warnings, is_v2):
     """Unknown is not safe: every unrecognized top-level key, domain or
     field becomes a warning instead of silent behaviour."""
     for key in sorted(data):
@@ -407,6 +503,10 @@ def _unknown_warnings(data, fname, warnings):
     if not isinstance(pol, dict):
         warnings.append("%s: 'policy' must be a mapping; ignored" % fname)
         return
+    enf = pol.get('enforcement')
+    if enf is not None and not is_v2:
+        warnings.append("%s: enforcement block requires version: 2; "
+                        'ignored' % fname)
     for domain in sorted(pol):
         if domain not in KNOWN_DOMAINS:
             if domain not in POLICY_META:
@@ -414,14 +514,26 @@ def _unknown_warnings(data, fname, warnings):
                                 % (fname, domain))
             continue
         ddef = pol[domain]
+        if domain == 'required_skills':
+            # list-valued domain: a list of skill names, nothing else
+            if not isinstance(ddef, list) \
+                    or not all(isinstance(x, str) for x in ddef):
+                warnings.append("%s: required_skills must be a list of "
+                                'strings; rule stays inactive' % fname)
+            continue
         if not isinstance(ddef, dict):
             warnings.append("%s: domain '%s' must be a mapping; ignored"
                             % (fname, domain))
             continue
+        known = KNOWN_DOMAINS[domain]
+        if is_v2:
+            known = known + V2_DOMAIN_FIELDS
         for field in sorted(ddef):
-            if field not in KNOWN_DOMAINS[domain]:
+            if field not in known:
+                hint = '' if is_v2 else ' (needs version: 2)' \
+                    if field in V2_DOMAIN_FIELDS else ''
                 warnings.append("%s: unknown field '%s' in domain '%s' "
-                                'ignored' % (fname, field, domain))
+                                'ignored%s' % (fname, field, domain, hint))
         sev = ddef.get('severity')
         if sev is not None and sev not in SEVERITY_MAP:
             warnings.append("%s: invalid severity %r in domain '%s'; "
@@ -441,46 +553,147 @@ def _unknown_warnings(data, fname, warnings):
                                                for x in ban)):
                 warnings.append("%s: content.ban_patterns must be a list "
                                 'of strings; rule stays inactive' % fname)
+        if domain == 'harness_versions':
+            req = ddef.get('required')
+            if req is not None and (not isinstance(req, dict) or not all(
+                    isinstance(k, str) and isinstance(v, str)
+                    for k, v in req.items())):
+                warnings.append("%s: harness_versions.required must be a "
+                                'map of harness id -> range string; rule '
+                                'stays inactive' % fname)
         for flag in ('block_on_failure', 'require_agents_md',
                      'prevent_secret_commits', 'forbid_wildcard'):
             v = ddef.get(flag)
             if v is not None and not isinstance(v, bool):
                 warnings.append("%s: %s.%s must be true or false; ignored"
                                 % (fname, domain, flag))
+        ba = ddef.get('block_above')
+        if ba is not None and is_v2 and ba not in BLOCK_SEVERITY_RANK:
+            warnings.append("%s: invalid block_above %r in domain '%s' "
+                            '(low|medium|high|critical); ignored'
+                            % (fname, ba, domain))
+
+
+def _enforcement_defaults():
+    return {'enabled': False, 'default_action': 'warn',
+            'unknown_action': 'warn'}
+
+
+def _merge_enforcement(blocks, warnings):
+    """blocks: [(settings dict, source name)] in file order, already
+    validated field-wise. enabled is OR across files; default_action
+    and unknown_action take the stricter value on conflict (block >
+    warn) with a warning, otherwise the last one set."""
+    merged = _enforcement_defaults()
+    enabled_any = False
+    for settings, fname in blocks:
+        if settings.get('enabled') is True:
+            enabled_any = True
+    merged['enabled'] = enabled_any
+    for field in ('default_action', 'unknown_action'):
+        seen = [(s[field], src) for s, src in blocks if field in s]
+        values = {v for v, _ in seen}
+        if not values:
+            continue
+        if len(values) > 1:
+            stricter = 'block' if 'block' in values else 'warn'
+            warnings.append(
+                "conflicting enforcement %s: %s; using the stricter (%s)"
+                % (field,
+                   ', '.join('%s in %s' % kv for kv in sorted(seen)),
+                   stricter))
+            merged[field] = stricter
+        else:
+            merged[field] = values.pop()
+    return merged
+
+
+def _parse_enforcement_block(pol, fname, is_v2, warnings):
+    """policy.enforcement of one file -> {'enabled','default_action',
+    'unknown_action'} with only the valid keys kept. None when the file
+    does not carry a usable enforcement block."""
+    if not is_v2:
+        return None   # already warned in _unknown_warnings
+    enf = pol.get('enforcement')
+    if enf is None:
+        return None
+    if not isinstance(enf, dict):
+        warnings.append("%s: enforcement must be a mapping; ignored"
+                        % fname)
+        return None
+    out = {}
+    known = ('enabled', 'default_action', 'unknown_action')
+    for key in sorted(enf):
+        if key not in known:
+            warnings.append("%s: unknown enforcement field '%s' ignored"
+                            % (fname, key))
+    if 'enabled' in enf:
+        if isinstance(enf['enabled'], bool):
+            out['enabled'] = enf['enabled']
+        else:
+            warnings.append("%s: enforcement.enabled must be true or "
+                            'false; ignored' % fname)
+    for field in ('default_action', 'unknown_action'):
+        v = enf.get(field)
+        if v is None:
+            continue
+        if v in ENFORCEMENT_ACTIONS:
+            out[field] = v
+        else:
+            warnings.append("%s: enforcement.%s must be block or warn; "
+                            'ignored' % (fname, field))
+    return out
 
 
 def _merge_policy_files(policy_files, warnings):
     """Layer policy files in order: the last file that defined a domain
     wins that domain wholesale; distinct severities for one domain
     produce a warning and the strictest severity wins. Custom rules
-    accumulate, a redefined id keeps the later rule. Returns
-    (versions, domains, custom_rules)."""
+    accumulate, a redefined id keeps the later rule. Enforcement blocks
+    (version 2 files only) merge across files: enabled is OR, actions
+    go stricter on conflict. Returns (versions, domains, custom_rules,
+    policy_name, enforcement)."""
     versions = []
-    domains = {}        # domain -> {'def': dict, 'source': str}
+    domains = {}        # domain -> {'def': dict|list, 'source': str}
     severity_seen = {}  # domain -> {severity: source}
     customs = []        # {'rule': dict, 'source': str}
     custom_by_id = {}
     meta_name = None
+    enf_blocks = []     # (validated settings, source name)
 
     for path in policy_files:
         data = parse_policy_file(path)
         fname = Path(path).name
         version = data.get('version')
+        is_v2 = version in (2, '2')
         if version is None:
             warnings.append("%s: no 'version' field; the report carries "
                             'null for this file' % fname)
+        elif not is_v2 and version not in (1, '1'):
+            warnings.append("%s: unsupported version %r; treating the "
+                            'file as version 1 (no enforcement)'
+                            % (fname, version))
         versions.append({'file': fname, 'version': version})
-        _unknown_warnings(data, fname, warnings)
+        _unknown_warnings(data, fname, warnings, is_v2)
 
         pol = data.get('policy') or {}
         if not isinstance(pol, dict):
             pol = {}
         if isinstance(pol.get('name'), str) and pol['name']:
             meta_name = pol['name']
+        enf = _parse_enforcement_block(pol, fname, is_v2, warnings)
+        if enf is not None:
+            enf_blocks.append((enf, fname))
         for domain in sorted(pol):
-            if domain not in KNOWN_DOMAINS:
-                continue  # already warned
+            if domain not in KNOWN_DOMAINS or domain == 'enforcement':
+                continue  # already warned / not a domain
             ddef = pol[domain]
+            if domain == 'required_skills':
+                if not isinstance(ddef, list) \
+                        or not all(isinstance(x, str) for x in ddef):
+                    continue  # already warned
+                domains[domain] = {'def': list(ddef), 'source': fname}
+                continue
             if not isinstance(ddef, dict):
                 continue  # already warned
             domains[domain] = {'def': dict(ddef), 'source': fname}
@@ -524,7 +737,8 @@ def _merge_policy_files(policy_files, warnings):
                    strictest))
             domains[domain]['def'] = dict(domains[domain]['def'],
                                           severity=strictest)
-    return versions, domains, customs, meta_name
+    enforcement = _merge_enforcement(enf_blocks, warnings)
+    return versions, domains, customs, meta_name, enforcement
 
 
 def _domain_active(domain, ddef):
@@ -544,6 +758,14 @@ def _domain_active(domain, ddef):
         ban = ddef.get('ban_patterns')
         return (isinstance(ban, list) and bool(ban)
                 and all(isinstance(x, str) for x in ban))
+    if domain == 'harness_versions':
+        req = ddef.get('required')
+        return (isinstance(req, dict) and bool(req)
+                and all(isinstance(k, str) and isinstance(v, str)
+                        for k, v in req.items()))
+    if domain == 'required_skills':
+        return (isinstance(ddef, list) and bool(ddef)
+                and all(isinstance(x, str) for x in ddef))
     return False
 
 
@@ -785,6 +1007,66 @@ def _check_content(ddef, rep, root, warnings):
     return ('fail' if v else 'pass'), v
 
 
+def _check_harness_versions(ddef, rep, root, warnings):
+    """Required harness versions from rep['harnesses']: a harness with
+    version None (or missing from the scan) is unknown, never a pass
+    and never a violation; a version outside its range violates."""
+    hs = rep.get('harnesses')
+    if not isinstance(hs, list) or not hs:
+        return 'unknown', []
+    by_id = {}
+    for h in hs:
+        if isinstance(h, dict) and isinstance(h.get('harness'), str):
+            by_id.setdefault(h['harness'], h)
+    v = []
+    unknown = False
+    for harness in sorted(ddef['required']):
+        spec = ddef['required'][harness]
+        parsed = _parse_version_range(spec)
+        entry = by_id.get(harness)
+        version = entry.get('version') if entry else None
+        if parsed is None:
+            warnings.append('invalid version range %r for harness %s; '
+                            'harness counts as unknown' % (spec, harness))
+            unknown = True
+            continue
+        if version is None:
+            # not detected, or detected without a version: unchecked
+            unknown = True
+            continue
+        if not _version_in_range(version, parsed):
+            v.append({
+                'message': "harness %s version %s is outside %r"
+                           % (harness, version, spec),
+                'evidence': [{'harness': harness, 'version': version,
+                              'required': spec}],
+            })
+    if v:
+        return 'fail', v
+    if unknown:
+        return 'unknown', []
+    return 'pass', []
+
+
+def _check_required_skills(ddef, rep, root, warnings):
+    """Skills from rep['skills']['entries']: every listed name must be
+    installed. No skills section or an empty list is unknown -- the
+    scan did not collect facts, and unchecked is not safe."""
+    skills = rep.get('skills')
+    entries = skills.get('entries') if isinstance(skills, dict) else None
+    if not isinstance(entries, list) or not entries:
+        return 'unknown', []
+    installed = {e.get('name') for e in entries if isinstance(e, dict)}
+    v = []
+    for name in ddef:
+        if name not in installed:
+            v.append({
+                'message': "required skill '%s' is not installed" % name,
+                'evidence': [{'skill': name}],
+            })
+    return ('fail' if v else 'pass'), v
+
+
 CHECKS = {
     'secrets': _check_secrets,
     'mcp': _check_mcp,
@@ -792,6 +1074,8 @@ CHECKS = {
     'git': _check_git,
     'permissions': _check_permissions,
     'content': _check_content,
+    'harness_versions': _check_harness_versions,
+    'required_skills': _check_required_skills,
 }
 
 
@@ -820,10 +1104,71 @@ def _workspace_policy(root, warnings):
 # --- evaluation -------------------------------------------------------------------
 
 def _effective_severity(domain, ddef):
-    sev = ddef.get('severity')
+    sev = ddef.get('severity') if isinstance(ddef, dict) else None
     if sev in SEVERITY_MAP:
         return sev
     return DEFAULT_DOMAIN_SEVERITY[domain]
+
+
+def _decide_enforcement(enforcement, rules, violations, domains):
+    """Enforcement decision over the finished rule rows.
+
+    A rule blocks when its domain set block_on_failure: true (version
+    2) or, without an explicit flag, when default_action is block;
+    block_above narrows a blocking rule to violations at or above that
+    finding severity. Suppressed rules have no violations left and
+    never block. With unknown_action block, rules the scan could not
+    check (status unknown) block as insufficient data -- unless real
+    violations already did. Returns the summary enforcement dict."""
+    out = {'enabled': bool(enforcement.get('enabled')),
+           'action_taken': 'none', 'exit_code': 0, 'blocking_rules': []}
+    if not out['enabled']:
+        return out
+
+    by_rule = {}
+    for viol in violations:
+        by_rule.setdefault(viol['id'], []).append(viol)
+
+    blocking = []
+    for r in rules:
+        rule_violations = by_rule.get(r['id']) or []
+        if not rule_violations:
+            continue   # pass/suppressed/unknown/not_applicable rows
+        ddef = (domains.get(r['domain']) or {}).get('def')
+        wants_block = None
+        threshold = None
+        if isinstance(ddef, dict):
+            flag = ddef.get('block_on_failure')
+            if isinstance(flag, bool):
+                wants_block = flag   # explicit, even when false
+            ba = ddef.get('block_above')
+            if ba in BLOCK_SEVERITY_RANK:
+                threshold = ba
+        if wants_block is None:
+            wants_block = enforcement.get('default_action') == 'block'
+        if not wants_block:
+            continue
+        if threshold is not None:
+            floor = BLOCK_SEVERITY_RANK[threshold]
+            top = max((BLOCK_SEVERITY_RANK.get(x['severity'], -1)
+                       for x in rule_violations), default=-1)
+            if top < floor:
+                continue   # violations stay, but below the threshold
+        blocking.append(r['id'])
+
+    if blocking:
+        out.update(action_taken='block', exit_code=1, blocking_rules=blocking)
+        return out
+
+    unknown_rules = [r['id'] for r in rules if r['status'] == 'unknown']
+    if enforcement.get('unknown_action') == 'block' and unknown_rules:
+        out.update(action_taken='block', exit_code=4,
+                   blocking_rules=unknown_rules)
+        return out
+
+    if violations:
+        out['action_taken'] = 'warn'
+    return out
 
 
 def evaluate_policies(rep, root, policy_files):
@@ -853,8 +1198,8 @@ def evaluate_policies(rep, root, policy_files):
             warnings.append('policy file from .agents-doctor.toml not '
                             'found: %s' % extra)
 
-    versions, domains, customs, policy_name = _merge_policy_files(files,
-                                                                  warnings)
+    versions, domains, customs, policy_name, enforcement = \
+        _merge_policy_files(files, warnings)
 
     rules = []       # ordered rule rows for the report
     violations = []  # finished violation dicts
@@ -979,8 +1324,12 @@ def evaluate_policies(rep, root, policy_files):
     summary['by_severity'] = {
         sev: sum(1 for v in violations if v['severity'] == sev)
         for sev in ('critical', 'high', 'medium', 'low')}
+    summary['enforcement'] = _decide_enforcement(
+        enforcement, rules, violations, domains)
 
     secrets_def = (domains.get('secrets') or {}).get('def') or {}
+    if not isinstance(secrets_def, dict):
+        secrets_def = {}
     return {
         'schema_version': POLICY_SCHEMA_VERSION,
         'root': str(root),
@@ -1024,6 +1373,14 @@ def render_markdown(report):
            s.get('warn', 0), s.get('info', 0), s.get('unknown', 0),
            s.get('suppressed', 0), s.get('not_applicable', 0),
            s.get('violations', 0)))
+    enf = s.get('enforcement') or {}
+    if enf.get('enabled'):
+        blockers = enf.get('blocking_rules') or []
+        lines.append(
+            'Enforcement: enabled, action %s, exit code %d%s.'
+            % (enf.get('action_taken'), enf.get('exit_code', 0),
+               ('; blocking rules: %s' % ', '.join(blockers))
+               if blockers else ''))
     warns = report.get('warnings') or []
     if warns:
         lines += ['', '## Warnings', '']

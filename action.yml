@@ -32,6 +32,10 @@ inputs:
     description: 'Path to a policy YAML (optional; evaluated by the policy subcommand, see docs/policies.md)'
     required: false
     default: ''
+  policy-enforcement:
+    description: 'Fail the job when policy enforcement blocks (version 2 policy with enforcement.enabled; exit 1 blocked, 4 insufficient data). Configuration and scan errors (2, 3) fail the job either way.'
+    required: false
+    default: 'false'
   deep:
     description: 'Scan git history for secrets'
     default: 'false'
@@ -91,9 +95,14 @@ runs:
         fi
         python "$DOCTOR" sarif "$SCAN" --out "$SARIF"
 
-    # the policy subcommand exits 0 once its report is written; whether
-    # a violation blocks anything is a decision inside the policy file
-    # (docs/policies.md), not this step
+    # the policy report is always written before any exit. With
+    # policy-enforcement: 'true' the exit code of the policy step
+    # propagates: 1 blocked by a policy rule, 4 strict enforcement with
+    # unknown rules. Without it enforcement outcomes (1, 4) stay
+    # advisory; configuration and scan errors (2, 3) fail the job
+    # either way because the check itself could not run.
+    # !cancelled(): the reports are worth uploading exactly when a
+    # later step failed the job
     - name: Evaluate policies
       if: ${{ !cancelled() && inputs.policy != '' }}
       shell: bash
@@ -102,9 +111,22 @@ runs:
         SCAN: ${{ github.workspace }}/agents-doctor-scan.json
         POLICY: ${{ inputs.policy }}
         OUT: ${{ github.workspace }}/agents-doctor-policy.json
+        ENFORCE: ${{ inputs.policy-enforcement }}
       run: |
         if [ ! -f "$SCAN" ]; then
           echo "agents-doctor: no scan report at $SCAN; policy evaluation skipped"
           exit 0
         fi
+        if [ "$ENFORCE" = 'true' ]; then
+          python "$DOCTOR" policy "$SCAN" --policy "$POLICY" --out "$OUT"
+          exit $?
+        fi
+        set +e
         python "$DOCTOR" policy "$SCAN" --policy "$POLICY" --out "$OUT"
+        rc=$?
+        set -e
+        if [ "$rc" -ne 1 ] && [ "$rc" -ne 4 ]; then
+          exit "$rc"
+        fi
+        echo "policy: exit $rc not propagated (policy-enforcement != 'true')"
+        exit 0

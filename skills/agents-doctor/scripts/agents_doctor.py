@@ -20,10 +20,12 @@ Subcommands:
   policy <scan.json> --policy F  evaluate corporate policies against a
                                  finished scan (see policies.py)
 
-Exit codes: 0 ok (compare always exits 0; policy exits 0 once the
-report is written -- CI blocking is a policy flag, not an exit code),
-1 usage/IO error, 2 explain: finding not found, 3 fix: no supported
-automatic fix.
+Exit codes: 0 ok. `policy` has its own contract (enforcement v2,
+docs/policies.md): 0 pass or enforcement off, 1 a blocking rule fired,
+2 policy file error, 3 scan unreadable or no root, 4 strict
+enforcement with unknown rules; the report is always written first.
+For everything else: 1 usage/IO error, 2 explain: finding not found,
+3 fix: no supported automatic fix.
 """
 import argparse
 import json
@@ -68,6 +70,13 @@ FAIL_ON_CHOICES = ['none'] + SEVERITY_ORDER[::-1]
 def _err(msg):
     print('%s: %s' % (PROG, msg), file=sys.stderr)
     return 1
+
+
+def _fail(code, msg):
+    """_err with a caller-chosen exit code (the policy contract uses
+    2 for configuration errors and 3 for an unusable scan)."""
+    print('%s: %s' % (PROG, msg), file=sys.stderr)
+    return code
 
 
 def _load_json(path):
@@ -117,9 +126,12 @@ def cmd_audit(a):
         else:
             print('warning: could not read baseline %s, diff skipped'
                   % a.baseline, file=sys.stderr)
+    policy_block = None
     if getattr(a, 'policies', None):
         # audit --policy: evaluate right here and embed the compliance
-        # report into the scan JSON (rep['policy_report'])
+        # report into the scan JSON (rep['policy_report']). An
+        # enforcement block (version 2 policies) is remembered and
+        # fails the command only after the scan is safely on disk.
         try:
             import policies
             policy_files = list(a.policies)
@@ -128,8 +140,11 @@ def cmd_audit(a):
             s = rep['policy_report'].get('summary', {})
             print('policy: %d rules, %d violations'
                   % (s.get('rules', 0), s.get('violations', 0)))
+            enf = s.get('enforcement') or {}
+            if enf.get('enabled') and enf.get('exit_code') in (1, 4):
+                policy_block = enf
         except policies.PolicyError as exc:
-            return _err(str(exc))
+            return _fail(2, str(exc))
         except ImportError:
             print('warning: policies.py unavailable, policy step skipped',
                   file=sys.stderr)
@@ -206,6 +221,18 @@ def cmd_audit(a):
             print('fail-on: %d finding(s) at or above %s with status fail'
                   % (len(hits), a.fail_on.upper()))
             return 1
+    # policy enforcement gate: same order of concerns -- the scan (with
+    # the embedded compliance report) was written above, so blocking
+    # now cannot lose it. Exit codes mirror the policy subcommand.
+    if policy_block is not None:
+        blocking = policy_block.get('blocking_rules') or []
+        print('policy: BLOCKED by %d rule(s): %s'
+              % (len(blocking), ', '.join(blocking)))
+        if policy_block.get('exit_code') == 4:
+            print('policy: strict enforcement cannot verify unknown '
+                  'rule(s); re-run with complete scan facts',
+                  file=sys.stderr)
+        return policy_block.get('exit_code', 1)
     return 0
 
 
@@ -496,10 +523,10 @@ def cmd_history(a):
 def cmd_policy(a):
     rep = _load_json(a.scan)
     if rep is None:
-        return 1
+        return 3   # message already printed by _load_json
     root = rep.get('root')
     if not root:
-        return _err('scan has no root; re-run the audit')
+        return _fail(3, 'scan has no root; re-run the audit')
     try:
         import policies
     except ImportError:
@@ -511,14 +538,16 @@ def cmd_policy(a):
         policy_files = policies.discover_policy_files(
             root, rep.get('home'))
         if not policy_files:
-            return _err('no --policy given and no policy packs found '
-                        '(see docs/policies.md)')
+            return _fail(2, 'no policy files: no --policy given and no '
+                            'policy packs found (see docs/policies.md)')
         print('policy files discovered: %s'
               % ', '.join(str(f) for f in policy_files))
     try:
         report = policies.evaluate_policies(rep, root, policy_files)
     except policies.PolicyError as exc:
-        return _err(str(exc))
+        return _fail(2, str(exc))
+    # the report is written (or printed) before any enforcement exit:
+    # a blocked run must still leave the evidence behind
     if a.format == 'md':
         text = policies.render_markdown(report)
     else:
@@ -536,7 +565,21 @@ def cmd_policy(a):
           % (s.get('rules', 0), s.get('violations', 0), s.get('fail', 0),
              s.get('warn', 0), s.get('info', 0), s.get('unknown', 0),
              s.get('suppressed', 0)))
-    return 0
+    enf = s.get('enforcement') or {}
+    if not enf.get('enabled'):
+        return 0
+    blocking = enf.get('blocking_rules') or []
+    code = enf.get('exit_code', 0)
+    if code == 1:
+        print('policy: BLOCKED by %d rule(s): %s'
+              % (len(blocking), ', '.join(blocking)))
+    elif code == 4:
+        print('policy: BLOCKED by %d unknown rule(s): %s'
+              ' (unknown_action=block, insufficient scan data)'
+              % (len(blocking), ', '.join(blocking)))
+    print('policy enforcement: enabled, action %s, exit code %d'
+          % (enf.get('action_taken'), code))
+    return code
 
 
 def cmd_watch(a):

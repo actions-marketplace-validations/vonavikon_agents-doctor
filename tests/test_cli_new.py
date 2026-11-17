@@ -269,7 +269,7 @@ class PolicySubcommandTest(unittest.TestCase):
         p.write_text('policy: [unclosed\n', encoding='utf-8')
         rc = agents_doctor.main(['policy', str(self.scan),
                                  '--policy', str(p)])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)   # policy contract: config error
 
     def test_audit_policy_flag_embeds_report(self):
         out = self.base / 'scan2.json'
@@ -288,4 +288,4 @@ class PolicySubcommandTest(unittest.TestCase):
                                  '--home', str(self.base),
                                  '--policy', str(self.base / 'nope.yml'),
                                  '--out', str(out)])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)   # policy contract: config error

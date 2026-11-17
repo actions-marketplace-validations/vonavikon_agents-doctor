@@ -152,6 +152,7 @@ const state = {
   },
   treemap: {
     metric: 'density', zoom: '', loadedOnce: false, nodes: new Map(), resizing: false,
+    selected: null,   // path of the selected cell; survives zoom and tab switches
   },
   simulate: { result: null, harness: '' },
   instructions: null,
@@ -538,21 +539,6 @@ function treeKeydown(ev) {
     if (isDir) toggleDir(path);
     else openInspector(path, null, { push: true });
   }
-}
-
-async function revealPathInTree(relPath) {
-  // Load and expand every ancestor directory of relPath, then focus the node.
-  const parts = relPath.split('/').filter(Boolean);
-  for (let i = 0; i < parts.length; i++) {
-    const dir = parts.slice(0, i).join('/');
-    const e = state.tree.cache.get(dir);
-    if (!e || (!e.children && !e.loading && !e.error)) await loadDir(dir);
-    if (i < parts.length - 1) state.tree.expanded.add(parts.slice(0, i + 1).join('/'));
-  }
-  renderTree();
-  const rows = visibleTreeRows();
-  const target = rows.find((r) => r.getAttribute('data-path') === relPath);
-  setTreeFocus(target || rows[0] || null);
 }
 
 /* --------------------------------------------------------------- findings */
@@ -1119,6 +1105,16 @@ function renderTreemap() {
   const rects = squarifyLayout(items, 0, 0, W, H);
   for (const r of rects) root.append(renderTreemapCell(r, max, 0));
   body.append(root);
+  applyTreemapSelection(root);
+}
+
+/* Re-apply the persisted selection after a re-render (zoom, metric or
+   filter change). The selected node may be off-screen (e.g. it is the
+   directory we just zoomed into) — then nothing lights up, which is fine. */
+function applyTreemapSelection(root) {
+  if (!state.treemap.selected) return;
+  const cell = root.querySelector('.tm-cell[data-path="' + CSS.escape(state.treemap.selected) + '"]');
+  if (cell) cell.classList.add('selected');
 }
 
 function renderTreemapCell(r, max, depth) {
@@ -1128,6 +1124,8 @@ function renderTreemapCell(r, max, depth) {
     class: 'tm-cell' + (isDir ? ' tm-zoomable' : ''),
     tabindex: '0',
     role: 'button',
+    'data-path': n.path,
+    'data-isdir': String(isDir),
     'aria-label': tmTooltipText(n, r.value),
   });
   cell.style.left = r.x + 'px';
@@ -1165,11 +1163,13 @@ function renderTreemapCell(r, max, depth) {
     }
   }
 
-  attachTreemapEvents(cell, n, isDir);
+  attachTreemapTooltip(cell, n);
   return cell;
 }
 
-function attachTreemapEvents(cell, n, isDir) {
+/* Tooltip only (hover + keyboard focus). Activation handlers live on
+   #treemap-body as delegated listeners — see onTreemapClick & co. */
+function attachTreemapTooltip(cell, n) {
   const tip = $('treemap-tooltip');
   const show = (evx) => {
     tip.textContent = tmTooltipText(n, metricValue(n));
@@ -1193,29 +1193,90 @@ function attachTreemapEvents(cell, n, isDir) {
     tip.style.top = (r.top + 8) + 'px';
   });
   cell.addEventListener('blur', () => { tip.hidden = true; });
+}
 
-  cell.addEventListener('click', () => {
-    if (isDir) {
-      state.tree.currentDir = n.path;
-      renderSimTargetChips();
-      switchTab('tree');
-      revealPathInTree(n.path);
-    } else {
-      openInspector(n.path, null, { push: true });
-    }
-  });
-  cell.addEventListener('dblclick', async (evx) => {
-    evx.preventDefault();
-    if (!isDir) return;
-    await zoomTreemap(n.path);
-  });
-  cell.addEventListener('keydown', (evx) => {
-    if (evx.key === 'Enter' || evx.key === ' ') {
-      evx.preventDefault();
-      if (isDir) { switchTab('tree'); revealPathInTree(n.path); }
-      else openInspector(n.path, null, { push: true });
-    }
-  });
+/* Pure decision tables for cell activation. DOM-free on purpose: the node
+   smoke test requires app.js and exercises these directly (see bottom of
+   file). Delegated handlers below must go through them so there is exactly
+   one place that decides what an interaction means.
+   detail is MouseEvent.detail: 1 = single click, 2+ = double click,
+   0 = keyboard-synthesized click (treated as single). */
+function resolveTreemapClick(detail, isDir) {
+  if (detail >= 2) return isDir ? 'zoom' : 'none';
+  return isDir ? 'select' : 'select-inspect';
+}
+
+function resolveTreemapKey(key, isDir) {
+  if (key === 'Enter' || key === ' ') return isDir ? 'zoom' : 'inspect';
+  if (key === 'Backspace') return 'up';
+  return null;
+}
+
+function treemapCellFromEvent(ev) {
+  // innermost .tm-cell: nested sub-cells must win over their parent cell
+  return ev.target && ev.target.closest ? ev.target.closest('.tm-cell') : null;
+}
+
+function selectTreemapCell(cell) {
+  state.treemap.selected = cell.getAttribute('data-path');
+  for (const c of $('treemap-body').querySelectorAll('.tm-cell.selected')) {
+    c.classList.remove('selected');
+  }
+  cell.classList.add('selected');
+}
+
+/* Single vs double click is told apart via MouseEvent.detail, not a
+   setTimeout(250) dance: the first click of a double click simply selects
+   the cell (same as OS file managers, harmless), and detail >= 2 makes the
+   click handler stand back so the dblclick handler can zoom. A timeout
+   would delay every selection by 250 ms and need cancel bookkeeping on
+   every re-render, which rebuilds all cells. */
+function onTreemapClick(ev) {
+  const cell = treemapCellFromEvent(ev);
+  if (!cell) return;
+  const isDir = cell.getAttribute('data-isdir') === 'true';
+  const act = resolveTreemapClick(ev.detail || 1, isDir);
+  if (act === 'select' || act === 'select-inspect') selectTreemapCell(cell);
+  if (act === 'select-inspect') {
+    openInspector(cell.getAttribute('data-path'), null, { push: true });
+  }
+}
+
+function onTreemapDblclick(ev) {
+  const cell = treemapCellFromEvent(ev);
+  if (!cell) return;
+  ev.preventDefault();   // no double-click text selection on labels
+  const isDir = cell.getAttribute('data-isdir') === 'true';
+  if (resolveTreemapClick(2, isDir) !== 'zoom') return;
+  selectTreemapCell(cell);
+  zoomTreemap(cell.getAttribute('data-path'));
+}
+
+/* Container-level keyboard: Enter/Space activate the focused cell,
+   Backspace zooms out one level (no-op at root). Escape for the tooltip
+   is handled in globalKeydown together with card/inspector closing. */
+function onTreemapKeydown(ev) {
+  // zooming re-renders every cell, which drops focus to the panel:
+  // Backspace-up must still work from anywhere inside the treemap,
+  // not only while a cell happens to hold focus
+  const inTreemap = ev.target && ev.target.closest
+    && ev.target.closest('#treemap-body') !== null;
+  if (!inTreemap) return;
+  if (ev.key === 'Backspace') {
+    ev.preventDefault();
+    treemapZoomOut();
+    return;
+  }
+  const cell = treemapCellFromEvent(ev);
+  if (!cell) return;
+  const isDir = cell.getAttribute('data-isdir') === 'true';
+  const act = resolveTreemapKey(ev.key, isDir);
+  if (!act) return;
+  ev.preventDefault();
+  if (act === 'up') { treemapZoomOut(); return; }
+  selectTreemapCell(cell);
+  if (act === 'zoom') zoomTreemap(cell.getAttribute('data-path'));
+  else openInspector(cell.getAttribute('data-path'), null, { push: true });
 }
 
 function tmTooltipText(n, value) {
@@ -1238,6 +1299,7 @@ async function zoomTreemap(rel) {
   state.treemap.zoom = rel;
   await treemapEnsure();
   renderTreemap();
+  treemapRefocus();
 }
 
 function treemapZoomOut() {
@@ -1249,6 +1311,17 @@ function treemapZoomOut() {
   return true;
 }
 
+/* Re-rendering replaces every cell, so the focused cell node dies and
+   focus falls back to <body> — after that, keyboard navigation is dead.
+   Park focus on the container (tabindex=-1) after each zoom re-render;
+   Backspace-up works from anywhere inside the treemap anyway. */
+function treemapRefocus() {
+  const active = document.activeElement;
+  if (active && active.closest && active.closest('#treemap-body')) return;
+  const body = $('treemap-body');
+  if (body) body.focus({ preventScroll: true });
+}
+
 function renderTreemapCrumbs() {
   const nav = $('treemap-crumbs');
   nav.textContent = '';
@@ -1256,7 +1329,8 @@ function renderTreemapCrumbs() {
   const mk = (label, target, current) => {
     if (current) nav.append(el('span', { class: 'crumb-current', text: label }));
     else nav.append(el('button', {
-      class: 'crumb-btn', text: label,
+      class: 'crumb-btn', text: label, 'data-path': target,
+      'aria-label': 'Zoom to ' + (label || 'root'),
       onclick: () => zoomTreemap(target),
     }));
   };
@@ -1767,6 +1841,7 @@ async function rescan() {
     state.tree.expanded.clear();
     state.treemap.nodes.clear();
     state.treemap.zoom = '';
+    state.treemap.selected = null;
     state.simulate.result = null;
     state.instructions = null;
     state.compare = null;
@@ -1805,6 +1880,10 @@ function globalKeydown(ev) {
   if (ev.altKey && ev.key === 'ArrowRight') { ev.preventDefault(); historyGo(1); return; }
   if (ev.key === 'Escape') {
     if (!$('card-overlay').hidden) { closeFindingCard(); return; }
+    if (state.tab === 'treemap' && !$('treemap-tooltip').hidden) {
+      $('treemap-tooltip').hidden = true;
+      return;
+    }
     if (!$('inspector').hidden) { closeInspector(); return; }
     if (state.tab === 'treemap') treemapZoomOut();
   }
@@ -1871,6 +1950,10 @@ function bindUI() {
   $('metric-risk').addEventListener('click', () => setTreemapMetric('risk'));
   $('metric-disk').addEventListener('click', () => setTreemapMetric('disk'));
 
+  $('treemap-body').addEventListener('click', onTreemapClick);
+  $('treemap-body').addEventListener('dblclick', onTreemapDblclick);
+  $('treemap-body').addEventListener('keydown', onTreemapKeydown);
+
   $('sim-run').addEventListener('click', runSimulate);
   $('sim-target').addEventListener('keydown', (evx) => {
     if (evx.key === 'Enter') runSimulate();
@@ -1905,5 +1988,12 @@ function boot() {
   switchTab('overview');
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+/* Browser: boot on DOM ready. Node (smoke test of the pure decision
+   tables): skip the DOM entirely and export them via CommonJS. */
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', boot);
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { resolveTreemapClick, resolveTreemapKey };
+}
 })();

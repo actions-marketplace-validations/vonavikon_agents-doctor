@@ -726,7 +726,7 @@ class UnknownFieldsTests(_TmpCase):
     def test_empty_policy_all_rules_not_applicable(self):
         pol = self.policy('version: 7\n')
         report = policies.evaluate_policies(self.scan(), self.root, [pol])
-        self.assertEqual(report['summary']['not_applicable'], 6)
+        self.assertEqual(report['summary']['not_applicable'], 8)
         self.assertEqual(report['summary']['violations'], 0)
         self.assertEqual(report['policy_versions'],
                          [{'file': 'policy.yml', 'version': 7}])
@@ -814,20 +814,20 @@ class CliPolicyTests(_TmpCase):
         self.assertEqual(rc, 0, se)
         self.assertIn('"rules_evaluated"', so)
 
-    def test_broken_policy_file_exits_one_with_file_and_line(self):
+    def test_broken_policy_file_exits_two_with_file_and_line(self):
         pol = self.policy('version: 1\nbroken: [unclosed\n')
         scan = self._scan_file(self.scan())
         rc, _, se = self._main(['policy', scan, '--policy', pol])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         # file name plus a line number (PyYAML points at the EOF mark,
         # the fallback parser at the opening line -- both carry both)
         self.assertRegex(se, r'policy\.yml:\d+')
 
-    def test_missing_policy_file_exits_one(self):
+    def test_missing_policy_file_exits_two(self):
         scan = self._scan_file(self.scan())
         rc, _, se = self._main(['policy', scan, '--policy',
                                 str(self.root / 'ghost.yml')])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn('ghost.yml', se)
 
 

@@ -1,0 +1,7 @@
+# Dev-only dependencies. The runtime (skills/agents-doctor/scripts) is
+# stdlib-only; nothing here is needed to run an audit.
+# Browser E2E tests: tests/e2e/test_ui_e2e.py. After installing, run
+#   python -m playwright install chromium
+# once to fetch the browser binary. Without playwright the E2E suite
+# skips itself and the plain unittest suite stays green.
+playwright>=1.44,<2

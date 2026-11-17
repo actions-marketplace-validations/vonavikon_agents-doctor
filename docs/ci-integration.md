@@ -171,5 +171,12 @@ an owner") are a separate concern: policy YAML files are evaluated
 against a scan by the policy engine — either embedded into the audit
 (`audit --policy FILE.yml`, the compliance report lands inside the scan
 JSON) or as a standalone `policy` subcommand writing its own report.
-Whether a violation blocks a pipeline is defined by the policy file
-itself, not by an exit code. See [policies.md](policies.md).
+
+Since policy schema version 2 violations can block a pipeline by
+themselves: a policy file with an `enforcement` block gives the
+`policy` subcommand (and `audit --policy`) dedicated exit codes —
+1 for a blocking violation, 4 for insufficient data under strict
+enforcement; the report is always written first. Set the action's
+`policy-enforcement: 'true'` input to propagate the verdict. Files
+without an enforcement block keep the historical always-zero behaviour.
+See [policies.md](policies.md).
