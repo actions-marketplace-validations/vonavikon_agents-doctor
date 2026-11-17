@@ -33,7 +33,19 @@ inside the run directory. The rules implemented here:
   ('moving'/'removing'/'creating') marks that run as interrupted.
   Nothing in it is deleted or resumed blindly -- its opid is recorded
   in the new manifest header as 'interrupted_run' and the new run
-  continues.
+  continues. Beyond detecting, find_incomplete(root) lists the
+  in-flight entries of the latest interrupted run and recover(root)
+  rolls each one back to its pre-operation state (trash copies move
+  back, created files/directories are removed after a re-check,
+  removed empty directories are recreated); anything that cannot be
+  rolled back without risking data is left in place and reported as a
+  conflict. Recovery is idempotent and itself write-ahead.
+- Concurrency lock: <root>/<TRASH_DIR_NAME>/.lock (O_EXCL creation,
+  content pid + timestamp) serializes mutating runs; a second run
+  while the lock is alive fails with LockBusy (remediate re-exports it
+  as RemediateBusy), a lock older than an hour whose pid is gone is
+  stolen with a journal line. On Windows the pid cannot be probed
+  safely, so lock age alone decides the steal.
 - Destination collisions never overwrite: an existing trash destination
   gets '.__N__' (N=1..999) appended to the basename until a free name is
   found. The manifest records the suffixed path.
@@ -67,6 +79,7 @@ import os
 import shutil
 import stat as stat_mod
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -92,17 +105,27 @@ ACTIONS = (ACTION_TRASH_MOVE, ACTION_RMDIR, ACTION_CREATE_FILE,
            ACTION_CREATE_DIRECTORY)
 
 # entry statuses that mean "an operation was in flight when the process
-# died" -- the signal crash recovery looks for
-IN_FLIGHT = ('moving', 'removing', 'creating')
+# died" -- the signal crash recovery looks for. 'recovering' is written
+# by recover() itself before it rolls an entry back, so a recovery that
+# crashed mid-undo leaves the entry visible to the next recovery.
+IN_FLIGHT = ('moving', 'removing', 'creating', 'recovering')
 
 # statuses restore() will pick up (plus 'restoring', left behind by a
 # restore that crashed mid-undo; a restore that failed once can be
-# retried while there is still something to undo)
+# retried while there is still something to undo). 'recovered' and
+# 'recovery_conflict' (written by recover()) are deliberately absent:
+# after a rollback the entry is done, and a conflict entry keeps its
+# disk state for a human to resolve.
 RESTORABLE = ('moved', 'removed', 'created', 'restore_failed', 'restoring')
 
 # statuses a completed-but-not-restored entry can carry; used to count
 # the entries the restorable flag keeps out of the undo set
 DONE_STATUSES = ('moved', 'removed', 'created')
+
+# terminal statuses recover() writes: rollback complete, or rollback
+# impossible without risking someone's data (left in place, reported)
+STATUS_RECOVERED = 'recovered'
+STATUS_RECOVERY_CONFLICT = 'recovery_conflict'
 
 
 class SecurityRefusal(Exception):
@@ -561,6 +584,130 @@ def find_interrupted(root):
     return best_opid
 
 
+# --- concurrency lock (ТЗ 16) -------------------------------------------------------
+
+# lock file inside the trash root guarding every mutating run; content
+# is "<pid>\n<started_at ISO>\n"
+LOCK_NAME = '.lock'
+LOCK_STALE_SECONDS = 3600
+
+
+class LockBusy(ValueError):
+    """The trash lock is held by another live run. Raised (never a
+    traceback) so callers like remediate.apply_plan can refuse cleanly;
+    remediate re-exports it as RemediateBusy. Subclasses ValueError on
+    purpose: agents_doctor.py's fix command already turns ValueError
+    from apply_plan into a one-line refusal, and this way the busy case
+    rides the same path without a traceback."""
+
+
+def _pid_alive(pid):
+    """Whether a pid still has a process. Returns True/False when
+    knowable, None when unknown. On POSIX os.kill(pid, 0) probes without
+    signalling; on Windows os.kill with any signal would TERMINATE the
+    target, so the pid is declared unknown there and staleness is judged
+    by lock age alone."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False       # garbage lock content: nothing to protect
+    if os.name == 'nt':
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True        # exists, owned by another user
+    except OSError:
+        return None
+    return True
+
+
+class TrashLock:
+    """Exclusive lock for trash-mutating runs: O_EXCL creation of
+    <root>/<TRASH_DIR_NAME>/.lock holding "<pid>\\n<started_at>".
+
+    A second acquire() while the lock exists raises LockBusy -- a clean
+    refusal, not a race. A lock older than LOCK_STALE_SECONDS whose pid
+    is provably gone is stolen instead (journaled to stderr, stolen=True
+    on the lock object); on Windows, where a pid probe cannot be made
+    safely, age alone decides. release() removes the file only while it
+    still names this process, so a lock re-stolen meanwhile is left
+    alone. Usable as a context manager; release() is idempotent."""
+
+    def __init__(self, root):
+        self.root = Path(root).resolve()
+        self.path = self.root / TRASH_DIR_NAME / LOCK_NAME
+        self.held = False
+        self.stolen = False
+
+    def acquire(self):
+        trash_parent = self.root / TRASH_DIR_NAME
+        if os.path.islink(str(trash_parent)):
+            raise SecurityRefusal(
+                'the trash folder is a symlink; a lock cannot be routed '
+                'through it: %s' % trash_parent)
+        trash_parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(str(self.path),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except FileExistsError:
+            self._steal_or_busy()
+            return self
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            fh.write('%d\n%s\n' % (os.getpid(), _iso_now()))
+        self.held = True
+        return self
+
+    def _read_pid(self):
+        """pid recorded in the lock file, or None when unreadable."""
+        try:
+            first = self.path.read_text(encoding='utf-8').splitlines()
+        except (OSError, ValueError):
+            return None
+        if first and first[0].strip().isdigit():
+            return int(first[0].strip())
+        return None
+
+    def _steal_or_busy(self):
+        try:
+            age = time.time() - os.stat(str(self.path)).st_mtime
+        except OSError:
+            age = None       # unreadable: treat as fresh and refuse
+        pid = self._read_pid()
+        alive = _pid_alive(pid)
+        if age is not None and age > LOCK_STALE_SECONDS and not alive:
+            print('warning: stealing stale trash lock %s (age %ds, pid %s)'
+                  % (self.path, int(age), pid), file=sys.stderr)
+            tmp = self.path.with_name('%s.stolen-%d' % (LOCK_NAME, os.getpid()))
+            tmp.write_text('%d\n%s\n' % (os.getpid(), _iso_now()),
+                           encoding='utf-8')
+            os.replace(str(tmp), str(self.path))
+            self.stolen = True
+            self.held = True
+            return
+        raise LockBusy(
+            'another trash run holds the lock (pid %s, age %ss): %s'
+            % (pid, 'unknown' if age is None else int(age), self.path))
+
+    def release(self):
+        """Remove the lock when it is still ours; never raises."""
+        if not self.held:
+            return
+        self.held = False
+        try:
+            if self._read_pid() == os.getpid():
+                os.remove(str(self.path))
+        except OSError:
+            pass            # already gone or unreadable: nothing to do
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        self.release()
+        return False
+
+
 # --- restore ------------------------------------------------------------------------
 
 def _sha256_file(path):
@@ -794,3 +941,271 @@ def restore(run_dir, root=None, opid=None, assume_yes=False, confirm=None):
         summary['restored'].append({'original_path': orig, 'action': action,
                                     'restored_to': e['restored_to']})
     return summary
+
+
+# --- crash recovery (ТЗ 16) --------------------------------------------------------
+
+def find_incomplete(root):
+    """In-flight manifest entries of the most recent interrupted run.
+
+    Scans <root>/<TRASH_DIR_NAME>/*/manifest.json for entries whose
+    status is in IN_FLIGHT ('moving'/'removing'/'creating'/'recovering')
+    -- the write-ahead record of an operation that started but whose
+    completion fix never landed because the process died. Only the
+    latest such run (by manifest mtime, like find_interrupted) is
+    reported; older interrupted runs are left for a later pass. Returns
+    a list of dicts: the full entry plus 'index' (position in
+    manifest['entries']), 'run_dir' and 'manifest_path'. An empty list
+    means nothing needs recovery -- recover() on it is a no-op."""
+    trash = Path(root) / TRASH_DIR_NAME
+    best = None            # (mtime, run_dir, entries_list)
+    try:
+        run_dirs = sorted(trash.iterdir())
+    except OSError:
+        return []
+    for rd in run_dirs:
+        mp = rd / MANIFEST_NAME
+        if not _exists(mp):
+            continue
+        try:
+            data = json.loads(mp.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        entries = data.get('entries')
+        if not isinstance(entries, list):
+            continue
+        if not any(isinstance(e, dict) and e.get('status') in IN_FLIGHT
+                   for e in entries):
+            continue
+        try:
+            mtime = mp.stat().st_mtime
+        except OSError:
+            mtime = 0
+        if best is None or mtime >= best[0]:
+            best = (mtime, rd, entries)
+    if best is None:
+        return []
+    _mtime, rd, entries = best
+    out = []
+    for i, e in enumerate(entries):
+        if isinstance(e, dict) and e.get('status') in IN_FLIGHT:
+            item = dict(e)
+            item['index'] = i
+            item['run_dir'] = str(rd)
+            item['manifest_path'] = str(rd / MANIFEST_NAME)
+            out.append(item)
+    return out
+
+
+def _rollback_entry(run_dir, root, entry):
+    """Roll one in-flight entry back to its pre-operation state.
+
+    Returns ('recovered', detail) or ('conflict', reason); a conflict
+    never destroys anything -- the disk state is left exactly as it is
+    and the reason names what blocked the rollback:
+
+    - trash_move: copy back to the original spot when the move had
+      happened (source gone, copy present); a no-op recovery when it had
+      not (source still present); both present, or both gone, or an
+      occupied original is a conflict;
+    - rmdir: recreate the empty directory when the rmdir had happened,
+      no-op when it had not;
+    - create_file: delete the created file, but only while its sha256
+      still matches the planned content recorded in the manifest;
+    - create_directory: remove the created directory, but only while it
+      is still empty.
+
+    Every destination goes through _undo_target (shape, containment,
+      symlink-free chain, never inside the trash folder)."""
+    action = _entry_action(entry)
+    orig = str(entry.get('original_path') or '')
+    if action == ACTION_TRASH_MOVE:
+        trash_rel = str(entry.get('trash_path') or '')
+        if not _rel_shape_ok(trash_rel):
+            return 'conflict', 'trash path has an unsafe shape'
+        src = run_dir / trash_rel
+        if not _is_under(src, run_dir):
+            return 'conflict', 'trash copy outside the run dir: %s' % trash_rel
+        src_ok = _exists(src)
+        try:
+            dst = _undo_target(root, orig)
+        except ValueError as exc:
+            return 'conflict', str(exc)
+        if src_ok and _exists(dst):
+            return 'conflict', ('both the original path and the trash copy '
+                                'exist; both left in place')
+        if not src_ok and not _exists(dst):
+            return 'conflict', ('trash copy missing and the original gone; '
+                                'nothing left to roll back')
+        if _exists(dst):
+            # src gone, original present: the move never started
+            return 'recovered', 'move never started; source still in place'
+        # the manifest-integrity size check restore() applies
+        if entry.get('type') == 'file':
+            recorded = entry.get('size')
+            try:
+                actual = os.stat(str(src)).st_size
+            except OSError:
+                actual = None
+            if (actual is not None and isinstance(recorded, int)
+                    and recorded > 0 and actual != recorded):
+                return 'conflict', (
+                    'trash copy size %d does not match the manifest record '
+                    '%d; left in place' % (actual, recorded))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if _exists(dst):
+            return 'conflict', 'restore destination appeared: %s' % dst
+        shutil.move(str(src), str(dst))
+        return 'recovered', 'moved back to %s' % dst
+    if action == ACTION_RMDIR:
+        try:
+            dst = _undo_target(root, orig)
+        except ValueError as exc:
+            return 'conflict', str(exc)
+        if _exists(dst):
+            return 'recovered', 'directory still present; rmdir never started'
+        os.makedirs(str(dst), exist_ok=True)
+        return 'recovered', 'empty directory recreated at %s' % dst
+    if action == ACTION_CREATE_FILE:
+        try:
+            dst = _undo_target(root, orig)
+        except ValueError as exc:
+            return 'conflict', str(exc)
+        if not _exists(dst):
+            return 'recovered', 'file was never created'
+        sha = entry.get('sha256')
+        if not sha:
+            return 'conflict', 'no sha256 recorded; file left in place'
+        if _sha256_file(dst) != sha:
+            return 'conflict', ('file differs from the planned content; '
+                                'left in place')
+        os.remove(str(dst))
+        return 'recovered', 'created file deleted at %s' % dst
+    if action == ACTION_CREATE_DIRECTORY:
+        try:
+            dst = _undo_target(root, orig)
+        except ValueError as exc:
+            return 'conflict', str(exc)
+        if not _exists(dst):
+            return 'recovered', 'directory was never created'
+        if any(dst.iterdir()):
+            return 'conflict', 'directory gained content; left in place'
+        os.rmdir(str(dst))
+        return 'recovered', 'created directory removed at %s' % dst
+    return 'conflict', 'unknown action: %r' % (entry.get('action'),)
+
+
+def recover(root, auto=False, confirm=None):
+    """Roll back the in-flight entries of the latest interrupted run.
+
+    The write-ahead manifest records an operation before it runs and
+    fixes the entry afterwards; a process that died in between leaves
+    the entry in flight ('moving'/'removing'/'creating'). recover()
+    returns every such entry to its pre-operation state:
+
+    - trash_move in flight: the trash copy goes back to the original
+      spot; when a new file already occupies that spot both are kept and
+      the entry is reported as a conflict;
+    - create_file in flight: the created file is deleted again, but only
+      after the sha256 re-check against the manifest (a file modified
+      since, or a partial write, stays and is reported);
+    - create_directory / rmdir in flight: the created directory is
+      removed while still empty / the removed empty directory is
+      recreated; content that appeared in the meantime is kept.
+
+    auto=False (default) prints the rollback plan and asks for the word
+    YES (confirm=callable replaces input for tests); auto=True executes
+    without asking. The whole recovery runs under the trash lock and
+    each entry is itself write-ahead ('recovering' before the rollback,
+    so a recovery that crashes is detectable by the next find_incomplete
+    and retryable). Recovering a workspace with nothing in flight is a
+    no-op; a second recover after a completed one finds no in-flight
+    entries either. Entries end as 'recovered' or 'recovery_conflict'
+    (terminal for recovery; restore() ignores both).
+
+    Returns {'run_dir': str|None, 'declined': bool, 'incomplete': int,
+    'recovered': [{original_path, action, detail}], 'conflicts':
+    [{original_path, action, reason}], 'failed': [{original_path,
+    action, error}]}. 'failed' holds unexpected errors (the entry keeps
+    its in-flight status so a later recover retries it); conflicts are
+    deliberate non-actions, not failures. Raises LockBusy when another
+    run holds the lock."""
+    root = Path(root).resolve()
+    report = {'run_dir': None, 'declined': False, 'incomplete': 0,
+              'recovered': [], 'conflicts': [], 'failed': []}
+    if not find_incomplete(root):
+        return report
+    lock = TrashLock(root)
+    lock.acquire()
+    try:
+        incomplete = find_incomplete(root)   # re-read under the lock
+        report['incomplete'] = len(incomplete)
+        if not incomplete:
+            return report
+        run_dir = Path(incomplete[0]['run_dir'])
+        report['run_dir'] = str(run_dir)
+        data = load_manifest(run_dir)
+        entries = data.get('entries') or []
+
+        print('crash recovery: %d unfinished operation(s) in %s'
+              % (len(incomplete), run_dir))
+        for item in incomplete:
+            print('  [%s] %s (status: %s) -> roll back'
+                  % (item.get('action'), item.get('original_path'),
+                     item.get('status')))
+        if not auto:
+            ask = confirm if confirm is not None else input
+            try:
+                answer = ask('Type YES to roll back %d operation(s): '
+                             % len(incomplete))
+            except EOFError:
+                answer = ''
+            if answer != 'YES':
+                report['declined'] = True
+                print('declined; nothing recovered')
+                return report
+
+        for item in incomplete:
+            e = entries[item['index']]
+            action = _entry_action(e)
+            orig = str(e.get('original_path') or '')
+            prev_status = e.get('status')
+            e['status'] = 'recovering'
+            save_manifest(run_dir, data)
+            try:
+                kind, detail = _rollback_entry(run_dir, root, e)
+            except Exception as exc:
+                # unexpected: keep the entry in flight so a later
+                # recover can retry, and report it
+                e['status'] = prev_status
+                e['recover_error'] = '%s: %s' % (type(exc).__name__, exc)
+                save_manifest(run_dir, data)
+                report['failed'].append({'original_path': orig,
+                                         'action': action,
+                                         'error': e['recover_error']})
+                print('%s: recovery of %s failed, continuing: %s'
+                      % ('trashops', orig, e['recover_error']),
+                      file=sys.stderr)
+                continue
+            if kind == 'conflict':
+                e['status'] = STATUS_RECOVERY_CONFLICT
+                e['recovery_note'] = detail
+                save_manifest(run_dir, data)
+                print('warning: %s (%s) left as-is: %s'
+                      % (orig, action, detail), file=sys.stderr)
+                report['conflicts'].append({'original_path': orig,
+                                            'action': action,
+                                            'reason': detail})
+                continue
+            e['status'] = STATUS_RECOVERED
+            e['recovered_at'] = _iso_now()
+            e['recovery_note'] = detail
+            e.pop('recover_error', None)
+            save_manifest(run_dir, data)
+            report['recovered'].append({'original_path': orig,
+                                        'action': action, 'detail': detail})
+        return report
+    finally:
+        lock.release()

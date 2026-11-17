@@ -51,6 +51,9 @@ DEFAULTS = {
     'exclude': {'directories': [], 'files': [], 'rules': []},
     'thresholds': {'max_file_mb': 5, 'junk_fail_gb': 0.5},
     'report': {'lang': 'en'},
+    # explicit opt-in external adapters (TZ 17): paths to python
+    # modules; never auto-discovered
+    'plugins': {'adapters': []},
 }
 
 try:
@@ -162,6 +165,12 @@ def _validate(data):
     lang = report.get('lang', DEFAULTS['report']['lang'])
     if not isinstance(lang, str):
         problems.append('report.lang must be a string')
+    plugins = data.get('plugins', {})
+    if not isinstance(plugins, dict):
+        return "'plugins' must be a table"
+    adapters = plugins.get('adapters', [])
+    if not isinstance(adapters, list) or not all(isinstance(v, str) for v in adapters):
+        problems.append('plugins.adapters must be a list of strings')
     return '; '.join(problems) or None
 
 

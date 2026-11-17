@@ -34,7 +34,7 @@ One command over the scanner and all modules.
 python skills/agents-doctor/scripts/agents_doctor.py audit <path>
     [--focus security|structure|agents]
     [--deep] [--home <dir>] [--baseline <prev.json>]
-    [--out scan.json] [--report AUDIT.md]
+    [--out scan.json] [--report AUDIT.md] [--runtime]
 ```
 
 Runs the scan in-process, writes scan.json, optionally writes a markdown
@@ -42,6 +42,41 @@ report (`--report`). `--focus` narrows gates and findings to one group:
 security=G6,G7; structure=G1,G4,G9; agents=G2,G3,G5,G8. `--baseline`
 adds a diff section (new and resolved findings) by comparing fingerprints
 with a previous scan. `--deep` also scans git history for secrets.
+`--runtime` (opt-in) adds runtime checks after the scan: python/git
+presence, CLI binaries of detected harnesses (`--version`,
+timeout-bounded), static MCP config validation; zero network requests;
+the result lands in the `runtime` section of the report.
+
+The audit includes the harness registry stage: detection of every
+registered environment (Z Code, Claude Code, Codex, Cursor, Gemini CLI,
+OpenCode, GitHub Copilot, Windsurf), adapter-specific validation
+(`CLAUDE_*`, `CODEX_*`, `CURSOR_*`, ... check ids) and deterministic
+instruction conflicts at the workspace root. External adapters are
+loaded only from paths listed in `.agents-doctor.toml`
+(`[plugins] adapters = [...]`).
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py simulate <root>
+    [--target <dir>] [--harness <id>] [--home <dir>]
+```
+
+Instruction loading simulation (TZ section 7): prints, per harness, the
+effective instruction set for a target directory — loaded sources with
+precedence, overridden/unloaded with reasons, and conflicts. Explicitly
+a model: chains follow each harness's documented loading rules, not a
+verified runtime.
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py ui [root]
+    [--scan scan.json] [--baseline old.json] [--home <dir>]
+    [--port 8765] [--no-open]
+```
+
+Local web UI on 127.0.0.1: workspace overview, lazy file tree with
+per-directory problem counts, findings explorer, masked file inspector,
+TreeMap (density/risk/size), instruction simulation and scan comparison.
+`--baseline` enables the Compare tab. The UI is read-only; fixes are
+planned (dry run) and applied only via the CLI.
 
 ```
 python skills/agents-doctor/scripts/agents_doctor.py sarif <scan.json>
@@ -112,7 +147,17 @@ planned step failed, 2 fid not found.
 python tools/validate_manifest.py
 python tools/validate_schema.py <scan.json>
 python tools/check_links.py [root]
+python tools/gen_harness_matrix.py [--check]
 ```
+
+`validate_manifest.py` cross-checks `.claude-plugin/plugin.json` and
+`marketplace.json` (names, versions, skill layout). `validate_schema.py`
+validates a scan JSON against `docs/schema/report-schema.json` (Draft7
+when jsonschema is installed, structural fallback otherwise).
+`check_links.py` verifies that local targets of markdown links exist.
+`gen_harness_matrix.py` regenerates docs/HARNESS-MATRIX.md from the
+adapter registry; `--check` fails when the committed doc is stale.
+Exit 0 pass, 1 problems printed, 2 usage error (check_links).
 
 `validate_manifest.py` cross-checks `.claude-plugin/plugin.json` and
 `marketplace.json` (names, versions, skill layout). `validate_schema.py`
@@ -133,6 +178,18 @@ The generator builds a deterministic synthetic workspace (small ~800,
 medium ~12000, large ~60000 files). The runner appends one row to
 `bench/BENCH-<date>.md`; `--max-wall` fails the run past a wall-time cap.
 See [bench/README.md](../bench/README.md).
+
+## Secret detection quality benchmark
+
+```
+python bench/secret_quality.py [--out bench/SECRET-QUALITY-<date>.md] [-v]
+```
+
+Precision / recall / FPR / FNR of the deterministic secret rules over
+the labeled corpus (parity corpus + extra true/false shapes), plus a
+separately-reported adversarial set (obfuscation, truncation, split
+values) that documents expected misses without failing the run. Floors:
+precision >= 0.95, recall >= 0.95; exit 1 otherwise (CI-gateable).
 
 ## LLM-layer eval
 

@@ -44,6 +44,21 @@ Behaviour of the file:
 The reader lives in `skills/agents-doctor/scripts/config.py`
 (`load_config(root)`); see the module docstring for the exact shapes.
 
+A fourth table loads external harness adapters (v2, TZ section 17):
+
+```toml
+[plugins]
+adapters = ["~/audit-adapters/my_env.py"]
+```
+
+Paths are explicit and absolute responsibility: agents-doctor never
+auto-discovers plugins. Each listed module must define
+`ADAPTERS = [cls, ...]` or export `HarnessAdapter` subclasses (see
+[ADAPTER-GUIDE.md](ADAPTER-GUIDE.md)). A broken or missing plugin is
+skipped with a reason in the scan's `plugins` section; it cannot crash
+the audit. The plugin runs with the scanner's own privileges — list
+only code you trust.
+
 Optional Python packages change behaviour when present: PyYAML enables
 full frontmatter parsing (without it the flat fallback parser reports
 unparseable frontmatter as `unknown`, never as ok); jsonschema enables
@@ -61,6 +76,8 @@ Scanner (`skills/agents-doctor/scripts/audit_scan.py`):
 | `--deep` | Also scan git history for secrets. Slower on large repos. |
 | `--baseline <scan.json>` | Previous report; adds a `diff` section with new and resolved fingerprinted findings. An unreadable baseline is skipped silently. |
 | `--out <file>` | Report path. Default `scan.json`. This is the only file the scanner writes. |
+| `--profile` | Per-stage timings to stderr (walk, git, context, enrich, gates). |
+| `--history-depth N` / `--history-all-refs` | Bound/widen the deep history scan; incomplete coverage reads as unknown, never pass. |
 
 Stage-4 CLI entry (`skills/agents-doctor/scripts/agents_doctor.py`):
 

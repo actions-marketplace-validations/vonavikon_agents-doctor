@@ -42,7 +42,9 @@ RULES = [
      'ere': 'sk-[A-Za-z0-9_-]{16,}'},
     {'id': 'SEC-002', 'kind': 'bearer-token', 'mask': 'Bearer ***',
      'confidence': 0.90,
-     'py': re.compile(r'Bearer\s+[A-Za-z0-9._-]{20,}'),
+     # HTTP auth schemes are case-insensitive (RFC 7235): a lowercase
+     # 'bearer' header is as real as 'Bearer'.
+     'py': re.compile(r'(?i)Bearer\s+[A-Za-z0-9._-]{20,}'),
      'ere': 'Bearer[[:space:]]+[A-Za-z0-9._-]{20,}'},
     {'id': 'SEC-003', 'kind': 'aws-access-key', 'mask': 'AKIA***',
      'confidence': 0.95,
@@ -75,8 +77,10 @@ RULES = [
      'ere': 'AIza[0-9A-Za-z_-]{35}'},
     {'id': 'SEC-105', 'kind': 'github-token', 'mask': 'ghp_***',
      'confidence': 0.95,
-     'py': re.compile(r'\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{30,})'),
-     'ere': r'(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{30,})'},
+     # gh[pousr]_ prefixes: classic PAT, OAuth app/user/server tokens
+     # share the same 36-char body shape.
+     'py': re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{30,})'),
+     'ere': r'(gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{30,})'},
     {'id': 'SEC-106', 'kind': 'slack-token', 'mask': 'xox***',
      'confidence': 0.95,
      'py': re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{10,}'),
@@ -88,8 +92,10 @@ RULES = [
     # --- generic keyword literal, last so the specific rules above win.
     {'id': 'SEC-005', 'kind': 'secret literal', 'mask': '***',
      'confidence': 0.70,
-     'py': re.compile(r'(?i)(?<![a-z0-9])(api[_-]?key|apikey|password|secret|token|authorization)["\']?\s*[:=]\s*["\'][^"\']{8,}'),
-     'ere': "(api[_-]?key|apikey|password|secret|token|authorization)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"},
+     # secret[_-]?key covers SECRET_KEY/client_secret_key style names
+    # where the keyword is not immediately followed by [:=].
+     'py': re.compile(r'(?i)(?<![a-z0-9])(api[_-]?key|apikey|password|secret[_-]?key|secret|token|authorization)["\']?\s*[:=]\s*["\'][^"\']{8,}'),
+     'ere': "(api[_-]?key|apikey|password|secret[_-]?key|secret|token|authorization)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']{8,}"},
 ]
 
 # POSIX ERE alternation for `git grep -E -i`, stable RULES order.
@@ -178,6 +184,7 @@ PARITY_CORPUS = [
     ('export KEY="sk-zyxwvutsrqponmlkj88"', 'SEC-001'),
     # SEC-002 bearer tokens
     ('Bearer abcdefghijklmnopqrstuv', 'SEC-002'),
+    ('authorization: bearer aabbccddeeff0011223344', 'SEC-002'),
     ('Authorization: Bearer zyxwvutsrqponmlkjihg', 'SEC-002'),
     # SEC-003 AWS access key ids
     ('AKIAIOSFODNN7EXAMPLE', 'SEC-003'),
@@ -189,6 +196,7 @@ PARITY_CORPUS = [
     ('api_key = "supersecretvalue"', 'SEC-005'),
     ('DB_PASSWORD: "hunter2-secret"', 'SEC-005'),
     ('password = "hunter2-secret-value"', 'SEC-005'),
+    ('SECRET_KEY: "django-insecure-1a2b3c4d5e"', 'SEC-005'),
     # SEC-101 access_token literals (specific rule beats SEC-005 'token')
     ('access_token = "gho_16C7e42F292c6912"', 'SEC-101'),
     ('accessToken: "8ybX87GB3jK7Ems4zDq9"', 'SEC-101'),
@@ -204,6 +212,7 @@ PARITY_CORPUS = [
     # SEC-105 GitHub tokens — corpus literals are assembled from pieces so
     # no live-looking token ever appears verbatim in this source file
     ('ghp_' + '16C7e42F292c6912E7710c838347Ae178B4A', 'SEC-105'),
+    ('gho_' + 'AAbbCCddEEff0011223344556677889900aAbB', 'SEC-105'),
     ('github_' + 'pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz1234567890', 'SEC-105'),
     # SEC-106 Slack tokens (same piecewise assembly)
     ('xox' + 'b-123456789012-1234567890123-abcdefghijklmnopqrstuv', 'SEC-106'),

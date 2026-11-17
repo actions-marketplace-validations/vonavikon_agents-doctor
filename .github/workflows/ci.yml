@@ -71,6 +71,21 @@ jobs:
       - run: python tools/validate_schema.py llm-eval/fixtures/clean.json
       - run: python tools/validate_schema.py llm-eval/fixtures/chaos.json
       - run: python tools/check_links.py
+      - run: python tools/gen_harness_matrix.py --check
+
+  secret-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: precision/recall floors (spec section 11.3)
+        run: python bench/secret_quality.py --out bench/SECRET-QUALITY-ci.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secret-quality-report
+          path: bench/SECRET-QUALITY-ci.md
 
   llm-eval-offline:
     runs-on: ubuntu-latest
@@ -115,7 +130,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, tests, coverage, validate, llm-eval-offline, benchmark, benchmark-windows]
+    needs: [lint, tests, coverage, validate, secret-quality, llm-eval-offline, benchmark, benchmark-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

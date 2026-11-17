@@ -167,9 +167,31 @@ CATEGORY_BY_PREFIX = {
 }
 
 # project-dir marker -> harness tool it belongs to ('.agents' is the
-# Z Code project skills dir, so it maps to the zcode harness)
-_DIR_TO_TOOL = {'.claude': 'claude', '.codex': 'codex',
-                '.zcode/config.json': 'zcode', '.agents': 'zcode'}
+# Z Code project skills dir, so it maps to the zcode harness).
+# Derived from the harness registry (adapter.dir_conflict_map); the
+# literal below is the fallback when the registry cannot be imported.
+_DIR_TO_TOOL_FALLBACK = {'.claude': 'claude', '.codex': 'codex',
+                         '.zcode/config.json': 'zcode', '.agents': 'zcode'}
+_DIR_TO_TOOL = None
+
+
+def _dir_to_tool():
+    global _DIR_TO_TOOL
+    if _DIR_TO_TOOL is None:
+        mapping = dict(_DIR_TO_TOOL_FALLBACK)
+        try:
+            from harness import HarnessContext, iter_adapters
+            ctx = HarnessContext(root=Path('.'), home=Path('.'))
+            for adapter in iter_adapters():
+                for marker in adapter.dir_conflict_map(ctx):
+                    # first adapter to claim a marker wins (registry
+                    # order), preserving the legacy zcode claim on
+                    # '.agents'
+                    mapping.setdefault(marker, adapter.harness_id)
+        except Exception:
+            pass
+        _DIR_TO_TOOL = mapping
+    return _DIR_TO_TOOL
 
 _REQUIRED_SKILL_FIELDS = ('name', 'description')
 
@@ -310,7 +332,7 @@ def _g1(facts, run):
         states = {t.get('tool'): t.get('state') for t in (h.get('tools') or [])}
         present = {}
         for pd in h.get('project_dirs') or []:
-            tool = _DIR_TO_TOOL.get(_norm(pd.get('name', '')))
+            tool = _dir_to_tool().get(_norm(pd.get('name', '')))
             if tool and pd.get('exists') and tool not in present:
                 present[tool] = pd.get('name')
         active = sorted(t for t in present if states.get(t) == 'active')
@@ -1106,16 +1128,51 @@ def evaluate(facts):
     creation order with stable <PREFIX>-<counter> ids (SEC-001, CFG-001,
     ...). A gate's status is the worst status among its rules; a gate
     whose rules all lack data is unknown, never pass.
+
+    facts['harness_findings_raw'] (adapter findings + instruction
+    conflicts, see harness/collect.py) join the gate they are mapped
+    to: their status counts into the gate worst-status and their ids
+    come from the same counters, with the stable harness/check_id
+    fields riding along.
     """
     facts = facts or {}
     counter = _Counter()
     findings = []
     ctx = {}
     gates_out = []
+    raw_by_gate = {}
+    for raw in facts.get('harness_findings_raw') or []:
+        raw_by_gate.setdefault(raw.get('gate'), []).append(raw)
     for gd in GATE_DEFS:
         run = _GateRun(gd['gid'], counter, findings, ctx)
         _BUILDERS[gd['gid']](facts, run)
-        status = worst_status([c['status'] for c in run.checks])
+        extra = raw_by_gate.get(gd['gid'], [])
+        appended = []
+        for raw in extra:
+            evidence = raw.get('evidence') or []
+            status = raw.get('status', 'unknown')
+            if not evidence and status != 'unknown':
+                status = 'unknown'   # no proof, no verdict
+            try:
+                f = report_model.make_finding(
+                    fid=counter.next_id(raw.get('prefix', 'GOV')),
+                    gate=gd['gid'], category=raw.get('category', 'governance'),
+                    severity=raw.get('severity', 'info'),
+                    status=status,
+                    title=raw.get('title', ''),
+                    description=raw.get('description', ''),
+                    evidence=evidence,
+                    confidence=raw.get('confidence', 0.5),
+                    recommendation=raw.get('recommendation', ''))
+            except ValueError:
+                continue   # malformed adapter finding: drop, never crash
+            f['harness'] = raw.get('harness', '')
+            f['check_id'] = raw.get('check_id', '')
+            findings.append(f)
+            appended.append(f)
+        statuses = ([c['status'] for c in run.checks]
+                    + [f['status'] for f in appended])
+        status = worst_status(statuses)
         conf = min((f['confidence'] for f in findings if f['gate'] == gd['gid']),
                    default=0.95)
         gates_out.append(report_model.make_gate(

@@ -15,17 +15,40 @@ The plugin runs a deterministic scanner and formats the report. It never deletes
 4. Write `<root>/AUDIT-<date>.md`: the gates table first, then sections in this order: Loading chain, Instruction files, Context tax, Repositories and folders, Sync mechanics, Secrets, Skills, Verification. End with commands the user runs themselves.
 5. Post a short chat summary: gate statuses (FAIL/WARN/PASS), the single most important finding, path to the report.
 
+## Harness-aware layer (v2)
+
+The scan includes the harness registry: detection of every registered
+environment (Z Code, Claude Code, Codex, Cursor, Gemini CLI, OpenCode,
+GitHub Copilot, Windsurf), adapter-specific findings (stable `check_id`
++ `harness` fields) and deterministic instruction conflicts. When
+narrating a finding with a `check_id`, explain the harness-specific
+meaning; spec provenance for every adapter is in `harness_spec_matrix`
+inside the scan JSON.
+
+Two follow-ups the skill can offer:
+
+- "Why is my instruction ignored?" — run
+  `python "<SKILL_DIR>/scripts/agents_doctor.py" simulate <root> [--target <dir>] [--harness <id>]`
+  and narrate: loaded (with precedence), overridden/unloaded with
+  reasons, conflicts. Say plainly that the chain is a model of the
+  documented loading rules, not a runtime check.
+- "Show me" — open the visual explorer:
+  `python "<SKILL_DIR>/scripts/agents_doctor.py" ui <root>` (localhost
+  only; read-only; tell the user the URL and stop the server when they
+  are done).
+
 ## Protocol coverage
 
 | Block | Scanner checks |
 |---|---|
-| Loading chain | freshness of `~/.zcode`, `~/.claude`, `~/.codex` by mtime; project `.agents/`, `.claude/`, `.codex/`; instructions kept for a dead harness |
-| Instruction files | pointer detection, twin drift, dead links/paths/commands, generic markers |
-| Context tax | session file weights, 16 KB project-file benchmark, memory index vs 24.4 KB / 200 lines |
+| Loading chain | registry detection of eight harnesses (markers + activity, honest confidence); instructions kept for a dead harness |
+| Instruction files | pointer detection, twin drift, dead links/paths/commands, generic markers; cross-source contradictions, duplications, cross-harness divergence |
+| Context tax | session file weights, 16 KB project-file benchmark, memory index vs 24.4 KB / 200 lines, Codex chain 32 768 |
 | Repos and folders | folder classification, remote class, ahead/behind, duplicate checkouts, nested repos |
 | Sync mechanics | `.git/hooks` flags (`add -A`, push, secret scan), sync commits in 30 days, `.gitignore` |
-| Secrets | files, `git grep --cached`, credentials in remote URLs; git history only with `--deep` |
+| Secrets | files, `git grep --cached`, credentials in remote URLs; git history only with `--deep`; rule quality gated by a precision/recall benchmark |
 | Skills | load locations, description vs 1024 limit, triggers, duplicates by name and hash |
+| Harness configs | settings permissions/hooks (Claude), sandbox/approval (Codex), rules globs (Cursor/Windsurf/Copilot/Gemini/OpenCode), MCP configs |
 | Verification | offered by the skill after instruction edits: auto-load weight before/after plus a typical task run |
 
 ## Rules

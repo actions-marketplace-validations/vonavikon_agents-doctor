@@ -54,11 +54,26 @@ changed}, the same diff the scanner's --baseline computes plus a CHANGED
 section (same section+path, different fingerprint), and reaudit() for
 the before/after report.
 
+Harness-aware fixes (ТЗ 13.3): findings raised by harness adapters
+carry a stable check_id; CHECK_ID_FIXES maps the supported ones to a
+plan. CLAUDE_LOCAL_DEPRECATED moves the file into the trash run
+(autofix), CURSOR_LEGACY_AND_RULES / WINDSURF_LEGACY_AND_RULES get a
+manual-migration plan (autofix_available=False, nothing executes). A
+check_id without a registry entry is UnsupportedError, like every
+unsupported finding.
+
+Concurrency and crash recovery (ТЗ 16): apply_plan runs under the
+trash lock (.agents-doctor-trash/.lock, O_EXCL) and refuses cleanly
+with RemediateBusy while another run holds it; trashops.find_incomplete
+/ trashops.recover roll back write-ahead entries an interrupted run
+left in flight.
+
 CLI:
     python remediate.py <scan.json> <fid> [--apply] [--root R] [--reaudit]
 
 Exit codes: 0 ok (dry run, declined confirmation or clean apply), 1 IO
-or safety error or failed steps, 3 no supported automatic fix.
+or safety error or failed steps (including RemediateBusy), 3 no
+supported automatic fix.
 """
 import argparse
 import json
@@ -82,15 +97,63 @@ PROG = 'remediate'
 TRASH_DIR_NAME = trashops.TRASH_DIR_NAME
 
 SKIPPED = 'skipped'
-# _execute_step sentinel: the target changed between plan() and apply;
-# the step is skipped, the disk is left alone for it
+# _execute_step sentinels: the target changed between plan() and apply
+# (the step is skipped, the disk is left alone for it), and a manual
+# step (advice only; nothing ever executes)
 CHANGED = 'changed'
+MANUAL = 'manual'
 
 _LOCAL_IGNORE_LINES = ('.env', '.mcp.json', 'settings.local.json')
 
 
 class UnsupportedError(Exception):
     """The finding has no supported automatic fix."""
+
+
+# clean refusal when another trash run holds the lock (ТЗ 16);
+# trashops.LockBusy under its remediate-facing name
+RemediateBusy = trashops.LockBusy
+
+
+# --- harness check_id registry (ТЗ 13.3) -------------------------------------------
+
+# Adapter findings carry a stable check_id (harness/adapters/*); the
+# registry maps the ones with a supported fix to a plan builder spec:
+# 'autofix' entries build a trash_move step for evidence[0].file;
+# manual entries list (command, note) migration steps that are printed
+# but never executed (apply_plan records them as skipped/manual).
+CHECK_ID_FIXES = {
+    'CLAUDE_LOCAL_DEPRECATED': {
+        'autofix': True,
+        'note': 'CLAUDE.local.md is deprecated; the file moves into the '
+                'trash run -- merge anything worth keeping into CLAUDE.md '
+                'or .claude/rules/ before deleting the trash',
+    },
+    'CURSOR_LEGACY_AND_RULES': {
+        'autofix': False,
+        'manual': [
+            ('migrate .cursorrules content -> .cursor/rules/legacy.md',
+             'the legacy format cannot express scoping; frontmatter '
+             '(description, globs) has to be written by hand'),
+            ('delete .cursorrules once the migrated rule is confirmed '
+             'to load',
+             'both sources present can overlap or conflict, so removal '
+             'follows the migration, not the other way round'),
+        ],
+    },
+    'WINDSURF_LEGACY_AND_RULES': {
+        'autofix': False,
+        'manual': [
+            ('migrate .windsurfrules content -> .windsurf/rules/legacy.md',
+             'the legacy format cannot express triggers; frontmatter has '
+             'to be written by hand'),
+            ('delete .windsurfrules once the migrated rule is confirmed '
+             'to load',
+             'both sources present can overlap or conflict, so removal '
+             'follows the migration, not the other way round'),
+        ],
+    },
+}
 
 
 def gitignore_template():
@@ -124,6 +187,14 @@ def _rel_under(target, root):
         return Path(target).resolve().relative_to(Path(root).resolve()).as_posix()
     except ValueError:
         return str(target)
+
+
+def _exists_quiet(p):
+    """exists() that treats permission errors as absent."""
+    try:
+        return Path(p).exists()
+    except OSError:
+        return False
 
 
 def after_path(scan_path):
@@ -179,6 +250,12 @@ def plan(rep, fid):
     without a supported automatic fix, and ValueError when a target
     would leave the audited root. No destructive command is ever
     generated for an unsupported finding.
+
+    Findings that carry a check_id (harness adapters, ТЗ 13.3) are
+    planned through the CHECK_ID_FIXES registry: a registered autofix
+    becomes a trash_move step, a registered manual entry becomes
+    display-only steps with autofix_available=False, an unregistered
+    check_id raises UnsupportedError naming it.
     """
     finding = None
     for f in rep.get('findings_detailed') or []:
@@ -193,6 +270,13 @@ def plan(rep, fid):
     title = str(finding.get('title') or '')
     evidence = finding.get('evidence') or []
     prefix = str(fid).split('-', 1)[0]
+
+    # 0) harness-adapter findings carry a stable check_id (ТЗ 13.3):
+    # the registry decides; a check_id without an entry is refused the
+    # same way every unsupported finding is
+    check_id = str(finding.get('check_id') or '')
+    if check_id:
+        return _plan_check_id(root, fid, check_id, evidence)
 
     # 1) confirmed-unused junk -> move into the trash dir
     if prefix == 'HLTH' and title.startswith('Unused data (confirmed_unused'):
@@ -280,6 +364,67 @@ def plan(rep, fid):
         % (fid, title, finding.get('gate'), finding.get('category')))
 
 
+def _trash_step(root, target, note):
+    """One trash_move step dict for an absolute target under root."""
+    return {
+        'action': 'trash_move',
+        'target': str(target),
+        'command': 'move "%s" -> "%s"' % (
+            target,
+            root / TRASH_DIR_NAME / '<timestamp>-<opid>'
+            / _rel_under(target, root)),
+        'reversible': True,
+        'note': note,
+        'snapshot': trashops.snapshot(target),
+    }
+
+
+def _plan_check_id(root, fid, check_id, evidence):
+    """Plan the fix for a harness-adapter finding keyed by check_id.
+
+    The target comes from evidence[0] ('file', as the adapters write
+    it; 'path' accepted too), absolute or root-relative. Registered
+    autofix entries build a trash_move step; manual entries build
+    display-only steps with autofix_available=False that apply_plan
+    records as skipped (nothing executes). A target that is already
+    gone since the scan plans nothing. Unregistered check_ids raise
+    UnsupportedError naming the check_id."""
+    spec = CHECK_ID_FIXES.get(check_id)
+    if spec is None:
+        raise UnsupportedError(
+            '%s: no supported automatic fix for check_id %s; apply its '
+            'recommendation by hand' % (fid, check_id))
+    ev = (evidence or [{}])[0] if evidence else {}
+    raw = ev.get('file') or ev.get('path')
+    if not raw:
+        raise UnsupportedError(
+            '%s: check_id %s evidence carries no file to fix'
+            % (fid, check_id))
+    target = Path(raw)
+    if not target.is_absolute():
+        target = root / target
+    _require_inside(root, target)
+    if not _exists_quiet(target):
+        return []            # already gone since the scan: nothing to plan
+    if spec.get('autofix'):
+        step = _trash_step(root, target, spec.get('note') or '')
+        step['check_id'] = check_id
+        step['autofix_available'] = True
+        return [step]
+    steps = []
+    for command, note in spec.get('manual') or []:
+        steps.append({
+            'action': 'manual',
+            'target': str(target),
+            'command': command,
+            'reversible': False,   # no automatic undo for a hand migration
+            'note': note,
+            'autofix_available': False,
+            'check_id': check_id,
+        })
+    return steps
+
+
 def print_plan(fid, steps):
     """Print a plan the way the CLIs show a dry run."""
     print('fix plan for %s:' % fid)
@@ -312,6 +457,8 @@ def _execute_step(step, root, get_run):
     action = step.get('action')
     target = Path(step.get('target', ''))
     cur = None
+    if action == 'manual':
+        return MANUAL       # advice only; apply_plan records it skipped
     if action in ('rmdir', 'trash_move'):
         # P0.1 gate: the symlink walk runs first, so a swapped link is
         # diagnosed as an attack, not as ordinary drift; then
@@ -373,7 +520,8 @@ def _execute_step(step, root, get_run):
     raise ValueError('unknown action: %r' % (action,))
 
 
-def apply_plan(steps, root, assume_yes=False):
+def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
+               before_findings=None):
     """Execute planned steps after an explicit confirmation.
 
     Interactive by default: the plan is printed and the caller must
@@ -382,14 +530,33 @@ def apply_plan(steps, root, assume_yes=False):
     is containment-checked against the resolved root before anything
     runs. A failing step is recorded and the run continues with the
     next step; a step whose target changed since plan() is skipped as
-    {'reason': 'changed'}. Every mutating step -- trash moves, rmdirs,
-    written .gitignore files -- is journaled in one trash run directory
+    {'reason': 'changed'}; a manual step (check_id registry, ТЗ 13.3)
+    is recorded as skipped with reason 'manual' and never touches the
+    disk. Every mutating step -- trash moves, rmdirs, written
+    .gitignore files -- is journaled in one trash run directory
     (timestamp + opid) with a write-ahead manifest, so the whole plan
     is undoable in one `safe_clean.py restore <run_dir>`.
+
+    Concurrency (ТЗ 16): the first mutating step takes the trash lock
+    (<root>/<TRASH_DIR_NAME>/.lock, O_EXCL); while another run holds
+    it apply_plan refuses with RemediateBusy (alias of
+    trashops.LockBusy) instead of racing it. The lock is released in a
+    finally; a plan whose every step was skipped or manual never takes
+    it and never creates the trash directory.
+
+    reaudit=True (ТЗ 13.2) re-runs audit_scan.scan(root, home) after a
+    successful apply (home defaults to Path.home(); pass the scan's
+    rep['home']) and adds report['reaudit'] = {'before': n, 'after': m}
+    -- before from the before_findings list (e.g. rep['findings']),
+    after from the fresh scan. The key only exists when reaudit was
+    requested.
 
     Returns {'executed': [...], 'failed': [...], 'skipped': [...],
     'declined': bool, 'trash_run': str|None, 'opid': str|None};
     declined=True means the confirmation was refused and nothing ran.
+    Raises RemediateBusy when the trash lock is held by another run
+    (nothing of this plan has executed at that point -- the lock is
+    taken before the first mutation).
     """
     root = Path(root).resolve()
     report = {'executed': [], 'failed': [], 'skipped': [], 'declined': False,
@@ -415,46 +582,79 @@ def apply_plan(steps, root, assume_yes=False):
             print('declined; nothing executed')
             return report
 
-    state = {'run': None}
+    state = {'run': None, 'lock': None}
 
     def get_run():
         if state['run'] is None:
-            state['run'] = trashops.TrashRun(
-                root, 'remediate', interrupted=trashops.find_interrupted(root))
+            # ТЗ 16: take the trash lock before the run directory is
+            # created; LockBusy escapes as RemediateBusy (the alias)
+            lock = trashops.TrashLock(root)
+            lock.acquire()
+            state['lock'] = lock
+            try:
+                state['run'] = trashops.TrashRun(
+                    root, 'remediate',
+                    interrupted=trashops.find_interrupted(root))
+            except Exception:
+                lock.release()
+                state['lock'] = None
+                raise
             report['trash_run'] = str(state['run'].run_dir)
             report['opid'] = state['run'].opid
         return state['run']
 
-    for st in steps:
-        try:
-            outcome = _execute_step(st, root, get_run)
-        except Exception as exc:  # recorded, then the run continues
-            report['failed'].append({'action': st.get('action'),
-                                     'target': st.get('target'),
-                                     'error': '%s: %s' % (type(exc).__name__, exc)})
-            print('%s: step failed, continuing: [%s] %s: %s'
-                  % (PROG, st.get('action'), st.get('target'), exc),
-                  file=sys.stderr)
-            continue
-        if outcome == SKIPPED:
-            report['skipped'].append({'action': st.get('action'),
-                                      'target': st.get('target')})
-        elif outcome == CHANGED:
-            report['skipped'].append({'action': st.get('action'),
-                                      'target': st.get('target'),
-                                      'reason': 'changed'})
-        else:
-            report['executed'].append(outcome)
-    if state['run'] is not None:
-        state['run'].finish(
-            planned=len(steps),
-            moved=sum(1 for e in report['executed']
-                      if e.get('action') == 'trash_move'),
-            failed=len(report['failed']), skipped=len(report['skipped']),
-            removed_dirs=sum(1 for e in report['executed']
-                             if e.get('action') == 'rmdir'),
-            created=sum(1 for e in report['executed']
-                        if e.get('action') == 'write_gitignore'))
+    try:
+        for st in steps:
+            try:
+                outcome = _execute_step(st, root, get_run)
+            except trashops.LockBusy:
+                # concurrency refusal: not a per-step failure, the
+                # whole apply refuses (nothing has mutated -- the lock
+                # precedes the first mutation of every action)
+                raise
+            except Exception as exc:  # recorded, then the run continues
+                report['failed'].append(
+                    {'action': st.get('action'), 'target': st.get('target'),
+                     'error': '%s: %s' % (type(exc).__name__, exc)})
+                print('%s: step failed, continuing: [%s] %s: %s'
+                      % (PROG, st.get('action'), st.get('target'), exc),
+                      file=sys.stderr)
+                continue
+            if outcome == SKIPPED:
+                report['skipped'].append({'action': st.get('action'),
+                                          'target': st.get('target')})
+            elif outcome == CHANGED:
+                report['skipped'].append({'action': st.get('action'),
+                                          'target': st.get('target'),
+                                          'reason': 'changed'})
+            elif outcome == MANUAL:
+                report['skipped'].append({'action': st.get('action'),
+                                          'target': st.get('target'),
+                                          'reason': 'manual'})
+            else:
+                report['executed'].append(outcome)
+        if state['run'] is not None:
+            state['run'].finish(
+                planned=len(steps),
+                moved=sum(1 for e in report['executed']
+                          if e.get('action') == 'trash_move'),
+                failed=len(report['failed']), skipped=len(report['skipped']),
+                removed_dirs=sum(1 for e in report['executed']
+                                 if e.get('action') == 'rmdir'),
+                created=sum(1 for e in report['executed']
+                            if e.get('action') == 'write_gitignore'))
+    finally:
+        if state['lock'] is not None:
+            state['lock'].release()
+
+    if reaudit and not report['declined']:
+        home_path = Path(home).resolve() if home else Path.home()
+        new_rep = audit_scan.scan(root, home_path)
+        report['reaudit'] = {
+            'before': (len(before_findings)
+                       if before_findings is not None else None),
+            'after': len(new_rep.get('findings') or []),
+        }
     return report
 
 
@@ -497,10 +697,15 @@ def main(argv=None):
         epilog='Supported fixes (v1): empty-dir rmdir; .gitignore template for '
                'a repo missing one; confirmed-unused junk moved into '
                '%s/<timestamp>-<opid>/ (write-ahead manifest; undo with '
-               'safe_clean.py restore <run_dir>). Everything else is refused '
+               'safe_clean.py restore <run_dir>); harness check_id fixes '
+               '(CLAUDE_LOCAL_DEPRECATED moves the file into the trash run; '
+               'CURSOR/WINDSURF_LEGACY_AND_RULES print a manual migration '
+               'plan). Everything else is refused '
                'with exit code 3. No network, no git mutations, nothing '
                'outside the audited root. Dry run by default; --apply still '
-               'asks for the word "yes".' % TRASH_DIR_NAME)
+               'asks for the word "yes". Runs hold the trash lock '
+               '(%s/.lock); a concurrent run is refused cleanly.' % (
+                   TRASH_DIR_NAME, TRASH_DIR_NAME))
     ap.add_argument('scan', help='scan.json from a previous audit')
     ap.add_argument('fid', help='finding id to fix (see agents_doctor.py explain)')
     ap.add_argument('--apply', action='store_true',
@@ -542,6 +747,9 @@ def main(argv=None):
     else:
         try:
             report = apply_plan(steps, root)
+        except RemediateBusy as exc:
+            print('%s: %s' % (PROG, exc), file=sys.stderr)
+            return 1
         except ValueError as exc:
             print('%s: %s' % (PROG, exc), file=sys.stderr)
             return 1

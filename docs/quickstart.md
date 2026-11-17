@@ -30,6 +30,17 @@ positives and writes the report. Without an agent, run the scanner
 yourself and read `scan.json`; a stage-4 CLI entry
 (`scripts/agents_doctor.py`) can also turn it into a markdown report.
 
+The scan knows eight harnesses (Claude Code, Codex, Cursor, Gemini CLI,
+OpenCode, GitHub Copilot, Windsurf, Z Code) and reports, per
+environment: whether it is detected (and how confident), its
+instruction files, its config problems and — when two active
+instruction sources disagree — the exact conflict. Two follow-ups:
+
+- `agents_doctor.py simulate <root>` — which instructions actually load
+  for a directory, what stays unloaded and why;
+- `agents_doctor.py ui <root>` — the visual explorer in your browser
+  (localhost, read-only).
+
 ## Reading the report
 
 The report is a gates table first, then findings grouped by block. Two

@@ -17,11 +17,22 @@
     "junk"
   ],
   "properties": {
-    "schema_version": { "type": "string", "const": "1.0" },
-    "root": { "type": "string" },
-    "home": { "type": "string" },
-    "generated_at": { "type": "string" },
-    "rules_version": { "type": "string" },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "root": {
+      "type": "string"
+    },
+    "home": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "rules_version": {
+      "type": "string"
+    },
     "stats": {
       "type": "object",
       "required": [
@@ -31,40 +42,100 @@
         "duration_sec"
       ],
       "properties": {
-        "total_files": { "type": "number" },
-        "total_size_bytes": { "type": "number" },
-        "skipped_symlinks_outside": { "type": "number" },
-        "duration_sec": { "type": "number" }
+        "total_files": {
+          "type": "number"
+        },
+        "total_size_bytes": {
+          "type": "number"
+        },
+        "skipped_symlinks_outside": {
+          "type": "number"
+        },
+        "duration_sec": {
+          "type": "number"
+        }
       }
     },
     "gates": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["gid", "n", "status"],
+        "required": [
+          "gid",
+          "n",
+          "status"
+        ],
         "properties": {
-          "gid": { "type": "string" },
-          "n": { "type": "number" },
-          "name": { "type": "string" },
-          "description": { "type": "string" },
-          "status": { "type": "string", "enum": ["pass", "fail", "warn", "unknown", "not_applicable"] },
+          "gid": {
+            "type": "string"
+          },
+          "n": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "warn",
+              "unknown",
+              "not_applicable"
+            ]
+          },
           "checks": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "rule": { "type": "string" },
-                "status": { "type": "string", "enum": ["pass", "fail", "warn", "unknown", "not_applicable"] }
+                "rule": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "warn",
+                    "unknown",
+                    "not_applicable"
+                  ]
+                }
               }
             }
           },
-          "pass_when": { "type": "string" },
-          "fail_when": { "type": "string" },
-          "warn_when": { "type": "string" },
-          "evidence": { "type": "array", "items": { "type": ["string", "object"] } },
-          "confidence": { "type": "number" },
-          "recommendation": { "type": "string" },
-          "doc_ref": { "type": "string" }
+          "pass_when": {
+            "type": "string"
+          },
+          "fail_when": {
+            "type": "string"
+          },
+          "warn_when": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "object"
+              ]
+            }
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "doc_ref": {
+            "type": "string"
+          }
         }
       }
     },
@@ -72,20 +143,81 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["fid", "gate", "category", "severity", "status", "title", "evidence", "recommendation"],
+        "required": [
+          "fid",
+          "gate",
+          "category",
+          "severity",
+          "status",
+          "title",
+          "evidence",
+          "recommendation"
+        ],
         "properties": {
-          "fid": { "type": "string" },
-          "gate": { "type": "string" },
-          "category": { "type": "string" },
-          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] },
-          "status": { "type": "string", "enum": ["pass", "fail", "warn", "unknown", "not_applicable"] },
-          "title": { "type": "string" },
-          "description": { "type": "string" },
-          "evidence": { "type": "array", "items": { "type": ["string", "object"] } },
-          "confidence": { "type": "number" },
-          "recommendation": { "type": "string" },
-          "autofix_available": { "type": "boolean" },
-          "schema_version": { "type": "string" }
+          "fid": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "warn",
+              "unknown",
+              "not_applicable"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "object"
+              ]
+            }
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "autofix_available": {
+            "type": "boolean"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string",
+            "description": "adapter id for harness-specific findings (claude_code, codex, ...); empty for core findings"
+          },
+          "check_id": {
+            "type": "string",
+            "description": "stable check identifier (e.g. CLAUDE_INSTRUCTION_CONFLICT); fid stays a per-scan counter"
+          }
         }
       }
     },
@@ -94,15 +226,31 @@
       "description": "Detections carry only a mask and a fingerprint. Raw values must never appear in a report; additionalProperties=false rejects any attempt to add e.g. a 'value' or 'preview' key.",
       "items": {
         "type": "object",
-        "required": ["path", "kind", "fingerprint"],
+        "required": [
+          "path",
+          "kind",
+          "fingerprint"
+        ],
         "additionalProperties": false,
         "properties": {
-          "path": { "type": "string" },
-          "line": { "type": "number" },
-          "kind": { "type": "string" },
-          "mask": { "type": "string" },
-          "fingerprint": { "type": "string" },
-          "confidence": { "type": "number" }
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "number"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mask": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          }
         }
       }
     },
@@ -110,23 +258,57 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "kind"],
+        "required": [
+          "name",
+          "kind"
+        ],
         "properties": {
-          "name": { "type": "string" },
-          "kind": { "type": "string", "enum": ["repo", "dir", "file"] },
-          "git": { "type": ["object", "null"] },
-          "size_bytes": { "type": "number" },
-          "extra": { "type": "object" }
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "repo",
+              "dir",
+              "file"
+            ]
+          },
+          "git": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "size_bytes": {
+            "type": "number"
+          },
+          "extra": {
+            "type": "object"
+          }
         }
       }
     },
     "junk": {
       "type": "object",
-      "required": ["files", "dirs", "empty_dirs"],
+      "required": [
+        "files",
+        "dirs",
+        "empty_dirs"
+      ],
       "properties": {
-        "files": { "type": "array" },
-        "dirs": { "type": "array" },
-        "empty_dirs": { "type": "array", "items": { "type": "string" } }
+        "files": {
+          "type": "array"
+        },
+        "dirs": {
+          "type": "array"
+        },
+        "empty_dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "findings": {
@@ -134,16 +316,62 @@
       "description": "Fingerprinted findings (stable fp + section + path) used for baseline diffs.",
       "items": {
         "type": "object",
-        "required": ["fp"],
+        "required": [
+          "fp"
+        ],
         "properties": {
-          "fp": { "type": "string" },
-          "section": { "type": "string" },
-          "path": { "type": "string" },
-          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] }
+          "fp": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          }
         }
       }
     },
-    "duplicates": { "type": "array" },
-    "large_files": { "type": "array" }
+    "duplicates": {
+      "type": "array"
+    },
+    "large_files": {
+      "type": "array"
+    },
+    "harnesses": {
+      "type": "array",
+      "description": "detection records for every registered adapter (status detected/possible/not_found, confidence, activity, markers, evidence)",
+      "items": {
+        "type": "object"
+      }
+    },
+    "harness_spec_matrix": {
+      "type": "array",
+      "description": "spec provenance per adapter: source URL, verified date, supported versions, known limitations",
+      "items": {
+        "type": "object"
+      }
+    },
+    "instruction_conflict_summary": {
+      "type": "object",
+      "description": "counts by kind: contradiction, duplication, divergence"
+    },
+    "harness_findings_raw": {
+      "type": "array",
+      "description": "adapter findings before the gates engine assigns fids (internal pipeline section)",
+      "items": {
+        "type": "object"
+      }
+    }
   }
 }

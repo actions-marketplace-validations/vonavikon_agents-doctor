@@ -1,5 +1,5 @@
 ---
-description: Run a workspace audit (full or focused: security, structure, agents; also human report, safe clean, compare, explain, fix)
+description: Run a workspace audit (full or focused: security, structure, agents; also human report, safe clean, compare, explain, fix, simulate, ui)
 ---
 
 # /agents-doctor
@@ -121,6 +121,35 @@ Remediation is plan-only first, always:
 If the finding has `autofix_available: false`, say so and give the
 recommendation as commands the user runs.
 
+## `simulate [dir]`
+
+Show which instruction files each harness would actually load for a
+directory (model of the documented loading rules, not a runtime check):
+
+```
+python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/agents_doctor.py simulate <root> [--target <dir>] [--harness <id>]
+```
+
+Walk the user through the surprises first: files they maintain that are
+NOT loaded (and why — wrong location, dead glob, agent-requested only),
+then contradictions/divergences between loaded sources. If the user asks
+"why is my instruction ignored", this is the command.
+
+## `ui`
+
+Open the local visual explorer in the browser:
+
+```
+python "${CLAUDE_PLUGIN_ROOT}/skills/agents-doctor/scripts/agents_doctor.py ui <root> [--baseline <old scan.json>] [--no-open]
+```
+
+Tell the user the URL (127.0.0.1) and what they can do there: overview,
+file tree with problem counts, findings table, masked file preview,
+TreeMap, instruction simulation, scan comparison (needs `--baseline`).
+The UI is read-only; fixes applied only via `fix` in the CLI. Keep the
+server running in the background while the user explores; stop it when
+they are done.
+
 ## anything else
 
 Reply with this usage list and stop:
@@ -133,6 +162,10 @@ Reply with this usage list and stop:
 /agents-doctor compare          diff against the previous scan
 /agents-doctor explain <fid>    walk through one finding
 /agents-doctor fix <fid>        plan a fix (applies nothing without confirmation)
+/agents-doctor simulate [dir]   which instructions load, per harness
+/agents-doctor ui               visual explorer in the browser
+/agents-doctor human            plain-language report
+/agents-doctor clean            guided safe cleanup
 ```
 
 ## Safety

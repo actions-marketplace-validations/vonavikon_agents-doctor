@@ -111,6 +111,35 @@ def cmd_audit(a):
     print('gates: fail %d, warn %d, pass %d, unknown %d, n/a %d'
           % (st('fail'), st('warn'), st('pass'), st('unknown'),
              st('not_applicable')))
+    if a.runtime:
+        try:
+            import runtime_health
+            rh = runtime_health.check_environment(
+                root, home, allow_subprocess=True)
+        except Exception as exc:
+            print('warning: runtime checks failed: %s' % exc,
+                  file=sys.stderr)
+            rh = None
+        if rh is not None:
+            # the runtime section must ride in the same JSON file
+            try:
+                on_disk = json.loads(Path(a.out).read_text(
+                    encoding='utf-8'))
+                on_disk['runtime'] = rh
+                Path(a.out).write_text(
+                    json.dumps(on_disk, ensure_ascii=False, indent=2),
+                    encoding='utf-8')
+            except (OSError, ValueError):
+                pass
+            summ = rh.get('summary', {})
+            print('runtime: pass %d, warn %d, fail %d, unknown %d'
+                  % (summ.get('pass', 0), summ.get('warn', 0),
+                     summ.get('fail', 0), summ.get('unknown', 0)))
+            for c in rh.get('checks', []):
+                if c.get('status') in ('fail', 'warn'):
+                    print('  [%s] %s: %s' % (c.get('status'),
+                                             c.get('id'),
+                                             c.get('detail', '')[:120]))
     line = ('audit: %d gates, %d findings -> %s'
             % (len(rep['gates']), len(rep['findings_detailed']), a.out))
     if a.focus:
@@ -251,6 +280,47 @@ def cmd_fix(a):
     return 1 if report['failed'] else 0
 
 
+def cmd_simulate(a):
+    root = Path(a.root).resolve()
+    if not root.is_dir():
+        return _err('not a directory: %s' % root)
+    target = None
+    if a.target:
+        target = Path(a.target)
+        if not target.is_absolute():
+            target = root / target
+        target = target.resolve()
+        if root not in target.parents and target != root:
+            return _err('target outside the workspace root: %s' % target)
+    from harness import HarnessContext
+    from instructions import simulate_loading
+    from instructions.simulation import format_simulation_text
+    ctx = HarnessContext(root=root, home=Path(a.home).resolve())
+    ids = [a.harness] if a.harness else None
+    rep = simulate_loading(ctx, target, ids)
+    print(format_simulation_text(rep))
+    return 0
+
+
+def cmd_ui(a):
+    try:
+        import ui.server as ui_server
+    except ImportError:
+        return _err('ui/server.py not found next to agents_doctor.py')
+    argv = ['--port', str(a.port)]
+    if a.scan:
+        argv += ['--scan', a.scan]
+    if a.root:
+        argv += ['--root', a.root]
+    if a.home:
+        argv += ['--home', a.home]
+    if a.baseline:
+        argv += ['--baseline', a.baseline]
+    if a.no_open:
+        argv += ['--no-open']
+    return ui_server.main(argv)
+
+
 # --- parser ----------------------------------------------------------------------
 
 def build_parser():
@@ -283,6 +353,11 @@ def build_parser():
     pa.add_argument('--report', default=None, metavar='AUDIT.md',
                     help='also write a markdown report '
                          '(needs report_generator.py)')
+    pa.add_argument('--runtime', action='store_true',
+                    help='opt-in runtime checks after the scan: CLI '
+                         'binaries of detected harnesses (--version, '
+                         'timeout-bounded), git/python presence, static '
+                         'MCP config validation. No network requests.')
     pa.set_defaults(func=cmd_audit)
 
     ps = sub.add_parser(
@@ -312,6 +387,33 @@ def build_parser():
                     help='execute the plan after an interactive confirmation '
                          '(default: print the plan only)')
     pf.set_defaults(func=cmd_fix)
+
+    psi = sub.add_parser(
+        'simulate', help='show which instructions load for a directory '
+                         '(model, not runtime-verified)')
+    psi.add_argument('root', help='workspace root directory')
+    psi.add_argument('--target', default=None, metavar='DIR',
+                     help='target directory inside the root (default: root)')
+    psi.add_argument('--harness', default=None, metavar='ID',
+                     help='restrict to one adapter id '
+                          '(e.g. claude_code; default: all detected)')
+    psi.add_argument('--home', default=str(Path.home()),
+                     help='home directory (default: this user home)')
+    psi.set_defaults(func=cmd_simulate)
+
+    pui = sub.add_parser(
+        'ui', help='open the local web UI (localhost only)')
+    pui.add_argument('root', nargs='?', default=None,
+                     help='workspace root (fresh scan when no --scan)')
+    pui.add_argument('--scan', default=None, metavar='scan.json',
+                     help='serve an existing scan.json instead of scanning')
+    pui.add_argument('--home', default=None)
+    pui.add_argument('--baseline', default=None, metavar='OLD.json',
+                     help='older scan.json: enables the Compare tab')
+    pui.add_argument('--port', type=int, default=8765)
+    pui.add_argument('--no-open', action='store_true',
+                     help='do not open the browser automatically')
+    pui.set_defaults(func=cmd_ui)
     return p
 
 

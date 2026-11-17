@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents-doctor — Visual Workspace Explorer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-brand">
+    <span class="brand-mark" aria-hidden="true">+</span>
+    <span class="brand-name">agents-doctor</span>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" id="tab-overview"  data-tab="overview"  role="tab" aria-selected="false">Overview</button>
+    <button class="tab" id="tab-tree"      data-tab="tree"      role="tab" aria-selected="false">Tree</button>
+    <button class="tab" id="tab-treemap"   data-tab="treemap"   role="tab" aria-selected="false">TreeMap</button>
+    <button class="tab" id="tab-instructions" data-tab="instructions" role="tab" aria-selected="false">Instructions</button>
+    <button class="tab" id="tab-findings"  data-tab="findings"  role="tab" aria-selected="false">Findings</button>
+    <button class="tab" id="tab-simulate" data-tab="simulate" role="tab" aria-selected="false">Simulate</button>
+    <button class="tab" id="tab-compare"  data-tab="compare"  role="tab" aria-selected="false">Compare</button>
+  </nav>
+
+  <div class="topbar-actions">
+    <div class="history-nav">
+      <button id="btn-back" class="icon-btn" title="Back (Alt+Left)" aria-label="Back" disabled>&#9664; Back</button>
+      <button id="btn-fwd"  class="icon-btn" title="Forward (Alt+Right)" aria-label="Forward" disabled>Fwd &#9654;</button>
+    </div>
+    <button id="btn-rescan" class="btn-accent" title="Rerun the scan in-process and reload">Rescan</button>
+  </div>
+</header>
+
+<div class="meta-row" id="meta-row">
+  <span class="meta-item" id="meta-root" title="Workspace root">root: <span class="meta-val mono">…</span></span>
+  <span class="meta-item" id="meta-date" title="Scan generation time">scan: <span class="meta-val mono">…</span></span>
+  <span class="meta-item" id="meta-rules" title="Rules version">rules: <span class="meta-val mono">…</span></span>
+  <span class="meta-item" id="meta-findings" title="Total findings">findings: <span class="meta-val mono">…</span></span>
+</div>
+
+<div class="chips-row" role="group" aria-label="Global severity filter (affects Findings table and Tree highlighting)">
+  <span class="chips-label">Filter:</span>
+  <div class="chips" id="severity-chips"></div>
+</div>
+
+<div class="workspace">
+<main class="layout" id="layout">
+
+  <!-- Overview -->
+  <section class="panel tab-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" hidden>
+    <div class="panel-body" id="overview-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading overview…</div>
+    </div>
+  </section>
+
+  <!-- Tree -->
+  <section class="panel tab-panel" id="panel-tree" role="tabpanel" aria-labelledby="tab-tree" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <input type="search" id="tree-search" class="input" placeholder="Filter visible nodes by name…" aria-label="Filter visible tree nodes by name">
+        <label class="inline-label">Sort
+          <select id="tree-sort" class="input select" aria-label="Sort tree nodes">
+            <option value="name">name</option>
+            <option value="problems">problems</option>
+          </select>
+        </label>
+        <button id="tree-expand-all" class="icon-btn" title="Expand all loaded directories">Expand loaded</button>
+        <button id="tree-collapse-all" class="icon-btn" title="Collapse all">Collapse all</button>
+      </div>
+    </div>
+    <div class="panel-body" id="tree-body" tabindex="0" role="tree" aria-label="Workspace tree">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading tree…</div>
+    </div>
+  </section>
+
+  <!-- TreeMap -->
+  <section class="panel tab-panel" id="panel-treemap" role="tabpanel" aria-labelledby="tab-treemap" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <span class="toolbar-label">Metric:</span>
+        <div class="seg" role="group" aria-label="Treemap metric">
+          <button class="seg-btn" id="metric-density" aria-pressed="true" title="Number of problems in subtree">Density</button>
+          <button class="seg-btn" id="metric-risk" aria-pressed="false" title="Weighted sum: 5*crit + 4*high + 3*med + 2*low + 1*info">Risk</button>
+          <button class="seg-btn" id="metric-disk" aria-pressed="false" title="File sizes from /api/tree; directory sizes are partial sums over fetched levels">Disk size</button>
+        </div>
+        <span class="formula mono" id="metric-formula" aria-live="polite">Density = count of findings in subtree</span>
+        <nav class="crumbs" id="treemap-crumbs" aria-label="Treemap zoom path"></nav>
+      </div>
+    </div>
+    <div class="panel-body" id="treemap-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading tree for treemap…</div>
+    </div>
+    <div class="treemap-tooltip mono" id="treemap-tooltip" role="status" hidden></div>
+  </section>
+
+  <!-- Instructions -->
+  <section class="panel tab-panel" id="panel-instructions" role="tabpanel" aria-labelledby="tab-instructions" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <label class="inline-label">Chain diagram
+          <select id="ins-harness" class="input select" aria-label="Harness for the chain diagram"></select>
+        </label>
+        <span class="formula" id="ins-note">sources collected client-side from /api/simulate at workspace root</span>
+      </div>
+    </div>
+    <div class="panel-body" id="instructions-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Simulating instruction loading…</div>
+    </div>
+  </section>
+
+  <!-- Simulate -->
+  <section class="panel tab-panel" id="panel-simulate" role="tabpanel" aria-labelledby="tab-simulate" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <label class="inline-label">Harness
+          <select id="sim-harness" class="input select" aria-label="Harness to simulate (all by default)"></select>
+        </label>
+        <label class="inline-label">Target
+          <input type="text" id="sim-target" class="input mono" placeholder="relative path from root (empty = root)" aria-label="Target directory, relative to workspace root">
+        </label>
+        <span class="chips" id="sim-target-chips"></span>
+        <button class="btn-accent" id="sim-run">Run</button>
+      </div>
+    </div>
+    <div class="panel-body" id="simulate-body">
+      <div class="empty-state"><span class="empty-glyph" aria-hidden="true">[ ]</span>Choose a harness and target, then Run.</div>
+    </div>
+  </section>
+
+  <!-- Compare -->
+  <section class="panel tab-panel" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <span class="toolbar-label">Fingerprint diff against the baseline scan given at server start.</span>
+      </div>
+    </div>
+    <div class="panel-body" id="compare-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading compare…</div>
+    </div>
+  </section>
+
+  <!-- Findings -->
+  <section class="panel tab-panel" id="panel-findings" role="tabpanel" aria-labelledby="tab-findings" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <label class="inline-label">Gate
+          <select id="fnd-gate" class="input select" aria-label="Filter by gate"><option value="">all gates</option></select>
+        </label>
+        <label class="inline-label">Harness
+          <select id="fnd-harness" class="input select" aria-label="Filter by harness"><option value="">all harnesses</option></select>
+        </label>
+        <input type="search" id="fnd-q" class="input grow" placeholder="Search title, description, id, evidence…" aria-label="Search findings">
+        <label class="inline-label checkbox">
+          <input type="checkbox" id="fnd-group"> group by directory
+        </label>
+      </div>
+    </div>
+    <div class="panel-body" id="findings-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading findings…</div>
+    </div>
+  </section>
+
+</main>
+<aside class="inspector" id="inspector" aria-label="File inspector" hidden>
+  <div class="inspector-header">
+    <div class="inspector-title">
+      <span class="inspector-path mono" id="insp-path">—</span>
+      <span class="badge-row" id="insp-badges"></span>
+    </div>
+    <button class="icon-btn" id="insp-close" title="Close (Esc)" aria-label="Close file inspector">&#10005;</button>
+  </div>
+  <div class="inspector-body">
+    <div id="insp-banner"></div>
+    <div class="code" id="insp-code" role="log" aria-label="File preview, secret-masked"></div>
+  </div>
+</aside>
+</div><!-- /workspace -->
+
+<!-- Finding detail card -->
+<section class="card-overlay" id="card-overlay" hidden>
+  <article class="card" role="dialog" aria-modal="true" aria-labelledby="card-fid" id="finding-card">
+    <header class="card-header">
+      <span class="mono card-fid" id="card-fid">—</span>
+      <span class="badge-row" id="card-badges"></span>
+      <button class="icon-btn" id="card-close" title="Close (Esc)" aria-label="Close finding card">&#10005;</button>
+    </header>
+    <div class="card-body" id="card-body"></div>
+  </article>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

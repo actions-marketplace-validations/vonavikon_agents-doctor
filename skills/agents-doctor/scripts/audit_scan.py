@@ -46,7 +46,7 @@ MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
 MEMORY_LINE_LIMIT = 200          # memory loads up to 200 lines or 25 KB, whichever comes first
 CHAIN_BUDGET = 32768             # Codex budget for the root + nested AGENTS.md chain
 SKILL_DESC_LIMIT = 1024          # Z Code skill description limit
-RULES_VERSION = '0.7.0'          # rule set version, goes into the report
+RULES_VERSION = '2.0.0'          # rule set version, goes into the report
 HARNESS_STALE_DAYS = 90          # older: harness counts as abandoned
 HARNESS_FRESH_DAYS = 30          # newer: active
 
@@ -832,6 +832,33 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
         rep['skills_extra'] = enrich.skills_frontmatter(rep['skills']['entries'])
     except OSError:
         rep['skills_extra'] = {}
+
+    # --- harness registry stage (Phase 1/2): detection over all
+    # registered adapters, adapter-specific validation, instruction
+    # conflicts at the workspace root. Legacy rep['harness'] above stays
+    # untouched for back-compat; this block only ADDS sections.
+    try:
+        import harness.collect as harness_collect
+        _act = {}
+        for t in rep['harness'].get('tools') or []:
+            if 'state' in t:
+                _act[t['tool']] = {'state': t['state']}
+        # legacy tool names vs registry ids: claude -> claude_code
+        if 'claude' in _act and 'claude_code' not in _act:
+            _act['claude_code'] = _act['claude']
+        hc = harness_collect.collect(root, home, _act)
+        rep['harnesses'] = hc['harnesses']
+        rep['harness_spec_matrix'] = hc['spec_matrix']
+        rep['instruction_conflict_summary'] = hc['conflict_summary']
+        rep['harness_findings_raw'] = (hc['adapter_findings']
+                                       + hc['instruction_conflicts'])
+    except Exception:
+        # the registry stage must never kill a scan; an empty section
+        # reads as 'no data' downstream (unknown, never pass)
+        rep.setdefault('harnesses', [])
+        rep.setdefault('harness_spec_matrix', [])
+        rep.setdefault('instruction_conflict_summary', {})
+        rep.setdefault('harness_findings_raw', [])
 
     prof['enrich'] = time.monotonic() - _tp; _tp = time.monotonic()
     rep['findings'] = collect_findings(rep)

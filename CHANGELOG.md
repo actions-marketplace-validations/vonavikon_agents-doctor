@@ -4,6 +4,77 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [2.0.0] - 2026-11-17
+
+Universal AI-agent workspace auditor: harness intelligence, instruction
+intelligence, local web UI. Backward compatible: CLI subcommands, JSON
+report shape, fid prefixes and all nine gates preserved; v1 scans still
+compare via --baseline.
+
+### Harness intelligence (TZ phases 1, 5, 7)
+
+- Adapter registry + documented contract (harness/base.py): detection,
+  instruction sources, loading resolution, config files, validation,
+  spec provenance (source URL, verified date, known limitations).
+- Eight adapters: Claude Code, OpenAI Codex, Cursor, Gemini CLI,
+  OpenCode, GitHub Copilot, Windsurf, Z Code. Per-harness checks with
+  stable check_ids (CLAUDE_SETTINGS_PERMISSIONS_WILDCARD,
+  CODEX_SANDBOX_DANGER, CURSOR_GLOB_NOMATCH, ...).
+- Honest detection: markers + activity; one stale file is 'possible',
+  never proof of use. Spec matrix generated from the registry
+  (tools/gen_harness_matrix.py, docs/HARNESS-MATRIX.md).
+- The four hand-synced harness lists found by the Phase 0 audit are
+  gone; audit_scan/enrich/gates query the registry.
+- External adapters: explicit opt-in via .agents-doctor.toml
+  [plugins] adapters = [...]; never auto-discovered, isolated on
+  failure (harness/external.py).
+
+### Instruction intelligence (TZ phase 2)
+
+- Loading simulation per harness for any target directory:
+  loaded/overridden/unloaded with reasons, precedence order, labelled
+  as a model of the documented rules (approximated=true).
+- Deterministic conflicts: contradictions across active sources,
+  3-line duplications, cross-harness divergence (warn, never error).
+  Same file pair reported once regardless of how many harnesses load
+  it. CLI: agents_doctor.py simulate.
+- Adapter findings and instruction conflicts join the nine gates with
+  stable check_id + harness fields (additive to the report schema).
+
+### Security (TZ phases 3, 11)
+
+- Secret detection quality benchmark (bench/secret_quality.py):
+  precision/recall/FPR/FNR over a labeled corpus + separately reported
+  adversarial shapes; floors precision>=0.95, recall>=0.95 (CI-gateable).
+- Rule improvements from the benchmark: case-insensitive Bearer,
+  gh[pousr]_ GitHub token prefixes, secret_key keyword variant.
+- MCP env-secret detection in Codex config (masked evidence).
+
+### Remediation (TZ phase 4)
+
+- Crash recovery: incomplete manifest entries detected and recovered
+  (rollback or completion, idempotent).
+- Concurrency lock (.agents-doctor-trash/.lock, O_EXCL, stale steal).
+- Harness-aware fixes keyed by stable check_id (CLAUDE_LOCAL_DEPRECATED
+  trash move; legacy-rules migrations as manual plans).
+- Re-audit after apply: before/after finding counts.
+
+### Local web UI (Visual TZ phases V1-V4)
+
+- agents_doctor.py ui: localhost-only server over one scan.json.
+  Overview, lazy file tree with aggregated problem counts, findings
+  explorer with filters/grouping, masked file inspector (secret rules
+  applied server-side), TreeMap (density/risk/size), instruction
+  simulation, baseline comparison. Read-only; fix plans are dry-run.
+  Path containment, 256 KB preview cap, no execution of workspace code.
+
+### Runtime health (TZ phase 6)
+
+- Opt-in runtime module (runtime_health.py): CLI/python/git presence,
+  per-harness CLI binaries (--version, timeout-bounded), static MCP
+  config validation. Never runs from the scan automatically; zero
+  network requests.
+
 ## [1.0.0] - 2026-11-17
 
 Production release: renamed to agents-doctor, all P0 hardening complete.

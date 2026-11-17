@@ -4,7 +4,7 @@
   <img src="docs/logo.png" alt="agents-doctor logo" width="120" height="120">
 </p>
 
-**Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Works with Claude Code, Z Code, or standalone. Read-only by default; cleanup is explicit, recoverable, and never automatic.
+**Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Understands eight harnesses (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot, Windsurf, Z Code), simulates which instructions actually load, detects conflicts between them, and ships a local visual explorer. Works standalone or through your agent. Read-only by default; cleanup is explicit, recoverable, and never automatic.
 
 ## Privacy model
 
@@ -30,10 +30,16 @@ What the LLM never sees:
 
 ## How it works
 
-Two layers:
+Two layers, three planes:
 
 1. A deterministic scanner, `audit_scan.py`: pure Python stdlib, no dependencies, offline, about 0.5 s on a mid-size folder on a warm cache. It walks the workspace and writes JSON.
 2. The skill orchestrator: reads the JSON, filters false positives, and writes `AUDIT-<date>.md` with a gates table and cleanup commands.
+
+Inside the deterministic layer:
+
+- **Harness intelligence** — a registry of adapters, one per environment. Each adapter knows its markers, instruction-loading rules, config files and structure expectations, and feeds the same nine gates ([adapter guide](docs/ADAPTER-GUIDE.md), [support matrix](docs/HARNESS-MATRIX.md)). Detection is honest: a marker plus recent activity reads as detected; one stale file reads as possible, never as proof of use.
+- **Instruction intelligence** — `simulate` shows which instruction files each harness would actually load for a directory (a model of the documented rules, labelled as such), what stays unloaded and why, and where two active sources contradict each other. Cross-harness differences are reported as divergence (warn), never as errors — they may be intentional.
+- **Local web UI** — `agents_doctor.py ui` opens a visual explorer on 127.0.0.1: overview, lazy file tree with per-directory problem counts, findings table, masked file previews, TreeMap, instruction simulation and scan comparison. Read-only; fixes are planned there and applied only via the CLI.
 
 The scanner only reads. Deletions and edits always stay with the human.
 
@@ -133,7 +139,7 @@ python skills/agents-doctor/scripts/sarif.py <scan.json> --out report.sarif
 python skills/agents-doctor/scripts/agents_doctor.py --help
 ```
 
-`sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `agents_doctor.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, and `fix <fid>` — plan-only by default.
+`sarif.py` writes SARIF 2.1.0 for CI integrations (one rule per gate, one result per fail/warn finding, stable fingerprints). `agents_doctor.py` is the single entry point: `audit --focus security|structure|agents`, `compare` (NEW/RESOLVED/PERSISTING/CHANGED against a baseline), `explain <fid>`, `fix <fid>` — plan-only by default — plus `simulate <root>` (instruction loading per harness) and `ui` (local visual explorer).
 
 For non-technical readers there is a plain-language value report (English and Russian): what is wrong in human words, what it costs (extra tokens every session with the assumption printed, disk space, secrets in plain sight), and — with a second scan after cleanup — what got better. Samples: [EN](docs/sample-human-report.md), [RU](docs/sample-human-report.ru.md).
 
@@ -153,7 +159,7 @@ Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix
 
 ## Documentation
 
-[Quick start](docs/quickstart.md) · [Architecture](docs/architecture.md) · [Gates methodology](docs/gates.md) · [Configuration and exclusions](docs/configuration.md) · [CLI reference](docs/cli.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](docs/contributing.md) · [Changelog](CHANGELOG.md) · [Release process](RELEASE.md) · [Report JSON schema](docs/schema/report-schema.json)
+[Quick start](docs/quickstart.md) · [Architecture](docs/architecture.md) · [Gates methodology](docs/gates.md) · [Configuration and exclusions](docs/configuration.md) · [CLI reference](docs/cli.md) · [Harness support matrix](docs/HARNESS-MATRIX.md) · [Adapter development guide](docs/ADAPTER-GUIDE.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](docs/contributing.md) · [Changelog](CHANGELOG.md) · [Release process](RELEASE.md) · [Report JSON schema](docs/schema/report-schema.json)
 
 ## QA
 
