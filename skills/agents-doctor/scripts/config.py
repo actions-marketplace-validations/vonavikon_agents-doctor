@@ -120,8 +120,18 @@ def _parse_fallback_toml(text):
             if not line.endswith(']'):
                 raise ValueError('line %d: unterminated section header' % lineno)
             name = line[1:-1].strip()
-            if not name or '.' in name:
+            if not name:
                 raise ValueError('line %d: bad section name %r' % (lineno, name))
+            if '.' in name:
+                # dotted subsection: [policy.exceptions] -> nested table
+                parent = result
+                for part in name.split('.'):
+                    if not part:
+                        raise ValueError('line %d: bad section name %r'
+                                         % (lineno, name))
+                    parent = parent.setdefault(part, {})
+                section = parent
+                continue
             section = result.setdefault(name, {})
             continue
         if '=' not in line:
@@ -136,6 +146,22 @@ def _parse_fallback_toml(text):
                 raise ValueError('line %d: unterminated array' % lineno)
             parsed = [_parse_scalar(item)
                       for item in _split_items(value[1:-1])]
+        elif value.startswith('{'):
+            # inline table: { key = "value", other = "value" } -- used
+            # by [policy] exceptions on pythons without tomllib
+            if not value.endswith('}'):
+                raise ValueError('line %d: unterminated inline table'
+                                 % lineno)
+            parsed = {}
+            for item in _split_items(value[1:-1]):
+                if '=' not in item:
+                    raise ValueError('line %d: inline table item %r '
+                                     'has no =' % (lineno, item.strip()))
+                k, _, v = item.partition('=')
+                k = k.strip().strip('"').strip("'")
+                if not k:
+                    raise ValueError('line %d: empty inline key' % lineno)
+                parsed[k] = _parse_scalar(v)
         else:
             parsed = _parse_scalar(value)
         section[key] = parsed

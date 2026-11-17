@@ -178,7 +178,9 @@ def collect_mcp_inventory(root, home) -> dict:
             if key in seen:
                 continue
             seen.add(key)
-            files_scanned.append(str(path))
+            # resolved form: CI runners hand out 8.3 short paths
+            # that do not string-match the workspace root
+            files_scanned.append(str(Path(path).resolve()))
             _collect_file(adapter.harness_id, path, servers, parse_errors)
     return {'servers': servers,
             'files_scanned': files_scanned,

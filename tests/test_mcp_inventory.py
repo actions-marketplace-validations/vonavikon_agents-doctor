@@ -99,6 +99,8 @@ class HttpInventoryTest(unittest.TestCase):
         self.assertNotIn(URL_CANARY, json.dumps(inv))
 
 
+@unittest.skipIf(getattr(mcp_inventory, 'tomllib', None) is None,
+                 'tomllib unavailable (Python 3.10)')
 class TomlInventoryTest(unittest.TestCase):
     def test_codex_toml_mcp_servers(self):
         root, home = _mkroot(), _mkroot()
