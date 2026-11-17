@@ -178,7 +178,12 @@ def _require_inside(root, target):
     except OSError as exc:
         raise ValueError('cannot resolve target %s: %s' % (target, exc))
     if resolved != root and root not in resolved.parents:
-        raise ValueError('target escapes the workspace root: %s' % target)
+        # TOCTOU defence: a target that planned inside but now
+        # resolves outside is an attack diagnosis, not a usage
+        # error; SecurityRefusal subclasses ValueError so plan-
+        # time callers see the same clean message as before
+        raise trashops.SecurityRefusal(
+            'target escapes the workspace root: %s' % target)
 
 
 def _rel_under(target, root):

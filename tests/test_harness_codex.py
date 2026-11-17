@@ -61,11 +61,15 @@ class CodexAdapterTests(unittest.TestCase):
         _write(self.home / '.codex' / 'version', '0.42.0\n')
         self.assertEqual(self.adapter.detect_version(self.ctx), '0.42.0')
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_detect_version_from_config_codex_version_key(self):
         _write(self.home / '.codex' / 'config.toml',
                'codex_version = "1.2.3"\n')
         self.assertEqual(self.adapter.detect_version(self.ctx), '1.2.3')
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_detect_version_from_config_version_key(self):
         _write(self.home / '.codex' / 'config.toml', 'version = "9.9.9"\n')
         self.assertEqual(self.adapter.detect_version(self.ctx), '9.9.9')
@@ -149,6 +153,8 @@ class CodexAdapterTests(unittest.TestCase):
     def test_validate_clean_workspace(self):
         self.assertEqual(self.adapter.validate(self.ctx), [])
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_sandbox_danger(self):
         _write(self.root / '.codex' / 'config.toml',
                'sandbox_mode = "danger-full-access"\n')
@@ -159,6 +165,8 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual(hits[0].severity, 'critical')
         self.assertEqual(hits[0].category, 'security')
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_sandbox_danger_with_approval_never(self):
         _write(self.root / '.codex' / 'config.toml',
                'sandbox_mode = "danger-full-access"\n'
@@ -173,6 +181,8 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual([f for f in findings
                           if f.check_id == 'CODEX_APPROVAL_NEVER'], [])
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_approval_never(self):
         _write(self.root / '.codex' / 'config.toml',
                'approval_policy = "never"\n')
@@ -185,6 +195,8 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual([f for f in findings
                           if f.check_id == 'CODEX_SANDBOX_DANGER'], [])
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_toml_parse_error(self):
         _write(self.root / '.codex' / 'config.toml',
                'this is [not valid toml')
@@ -222,6 +234,8 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual([f for f in self.adapter.validate(self.ctx)
                           if f.check_id == 'CODEX_OVERRIDE_IGNORED'], [])
 
+    @unittest.skipIf(codex_module.tomllib is None,
+                 'tomllib unavailable (Python 3.10)')
     def test_mcp_env_secrets(self):
         _write(self.home / '.codex' / 'config.toml',
                '[mcp_servers.search]\n'

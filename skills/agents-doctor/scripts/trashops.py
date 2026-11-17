@@ -128,11 +128,13 @@ STATUS_RECOVERED = 'recovered'
 STATUS_RECOVERY_CONFLICT = 'recovery_conflict'
 
 
-class SecurityRefusal(Exception):
+class SecurityRefusal(ValueError):
     """A _pre_operation_check refused the mutation (P0.1 TOCTOU
     defence): the target failed the containment, symlink-chain or
     snapshot verification run immediately before the filesystem
     change. Nothing was touched."""
+    # ValueError base: callers that catch ValueError (cmd_fix,
+    # plan()) get a clean one-line refusal instead of a traceback.
 
 
 def new_opid():

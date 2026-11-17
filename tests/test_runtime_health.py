@@ -318,7 +318,7 @@ class TestPathCheck(RuntimeHealthCase):
         self.assertEqual(check['status'], 'fail')
 
     def test_warn_on_single_entry(self):
-        with mock.patch.dict(os.environ, {'PATH': 'C:/only/one'}):
+        with mock.patch.dict(os.environ, {'PATH': '/only/one'}):
             check = runtime_health._check_path()
         self.assertEqual(check['status'], 'warn')
 
