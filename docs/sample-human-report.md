@@ -1,6 +1,6 @@
 # What the audit found — in plain words
 
-Folder checked: X:\Repos\agents-doctor\qa\scenarios\03-leaver-chaos\run\workspace
+Folder checked: C:\workspaces\chaos-demo\workspace
 
 ## The short version
 
@@ -31,7 +31,7 @@ Cleanup can make every agent start faster and waste less.
 
 ## Next step
 
-- Run the safe cleanup (`remediate.py`): it works through the findings one at a time and asks before every change.
+- Run the safe cleanup (`safe_clean.py`): it works through the findings one at a time and asks before every change.
 - Then run the audit again: the second report shows the "after" picture and what improved.
 - This audit changed nothing: it only read files and counted.
 
