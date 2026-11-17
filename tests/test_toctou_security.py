@@ -278,9 +278,14 @@ class EscapeAttempt(ToctouCase):
         step = {'action': 'trash_move',
                 'target': str(self.ws / os.pardir / 'victim.txt'),
                 'command': 'move', 'reversible': True, 'note': ''}
-        with self.assertRaises(ValueError):
-            with redirect_stdout(StringIO()):
-                remediate.apply_plan([step], str(self.ws), assume_yes=True)
+        # pre-flight escapes are recorded as refused steps (same shape
+        # as an in-flight refusal), not raised
+        with redirect_stdout(StringIO()):
+            report = remediate.apply_plan([step], str(self.ws),
+                                          assume_yes=True)
+        self.assertEqual(report['executed'], [])
+        self.assertEqual(len(report['failed']), 1)
+        self.assertIn('SecurityRefusal', report['failed'][0]['error'])
 
         plan = {'root': str(self.ws), 'max_bytes': safe_clean.DEFAULT_MAX_BYTES,
                 'items': [{'path': os.path.join(os.pardir, 'victim.txt'),
