@@ -32,7 +32,13 @@ API (all GET unless noted, JSON):
   /api/harnesses                     detection + spec matrix
   /api/findings                      ?severity= &gate= &status= &harness= &q=
   /api/finding/<fid>                 one finding in full
-  /api/tree                          ?path=<rel>  lazy children + counts
+  /api/tree                          ?path= &cursor= &sort= &sev=
+                                     paged children + counts (TZ 3.0 6.2)
+  /api/tree/stats                    ?path=<rel>  recursive size
+                                     accounting with a fingerprint
+                                     cache (TZ 3.0 6.3)
+  /api/search                        ?q= &limit=  name search over the
+                                     whole workspace, not just loaded tree
   /api/file                          ?path=<rel>  masked text preview
   /api/simulate                      ?target=<rel> &harness=<id>
   /api/fixplan                       ?fid=<id> remediation plan (dry)
@@ -45,10 +51,12 @@ import argparse
 import hmac
 import json
 import mimetypes
+import os
 import re
 import secrets
 import sys
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -63,8 +71,16 @@ import secret_rules        # noqa: E402  (preview masking)
 import remediate           # noqa: E402  (dry-run plans only)
 
 MAX_PREVIEW_BYTES = 256 * 1024
-MAX_TREE_CHILDREN = 2000
+TREE_PAGE = 500            # /api/tree page size (TZ 3.0 6.2)
+SEARCH_SCAN_CAP = 100_000  # max entries visited by one /api/search
+SEARCH_LIMIT_DEFAULT = 100
+SEARCH_LIMIT_MAX = 500
 SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info']
+TREE_SORTS = ('name', 'size', 'problems')
+
+
+class ApiUsageError(ValueError):
+    """Bad query parameter: reported to the wire as HTTP 400."""
 
 
 class UiState:
@@ -76,6 +92,10 @@ class UiState:
         self.root = root.resolve()
         self.baseline = baseline
         self._counts = _per_file_counts(report)
+        # rel-path -> (fingerprint, stats response) for /api/tree/stats;
+        # cleared on every reload (POST /api/rescan) because findings
+        # and the tree both change underneath (TZ 3.0 6.3)
+        self._stats_cache = {}
 
     def reload(self, report: dict, baseline: dict | None = None):
         with self.lock:
@@ -83,6 +103,7 @@ class UiState:
             if baseline is not None:
                 self.baseline = baseline
             self._counts = _per_file_counts(report)
+            self._stats_cache = {}
 
     @property
     def counts(self) -> dict:
@@ -231,46 +252,293 @@ def api_finding(state: UiState, fid: str):
     return None
 
 
+def _tree_child(state: UiState, entry) -> dict:
+    """One child record for /api/tree: same keys as before the TZ 3.0
+    pagination change (name/path/is_dir/symlink/size/mtime/counts).
+    counts come from the full findings map, never from a page."""
+    relpath = Path(entry.path).relative_to(state.root).as_posix()
+    try:
+        is_dir = entry.is_dir()
+        symlink = entry.is_symlink()
+    except OSError:
+        is_dir, symlink = False, False
+    child = {
+        'name': entry.name,
+        'path': relpath,
+        'is_dir': is_dir,
+        'symlink': symlink,
+    }
+    try:
+        st = entry.stat()
+        if not is_dir:
+            child['size'] = st.st_size
+            child['mtime'] = st.st_mtime
+    except OSError:
+        child['size'] = None
+    if is_dir:
+        child['counts'] = _dir_counts(state, relpath)
+    else:
+        child['counts'] = state.counts.get(relpath,
+                                           {s: 0 for s in SEVERITY_ORDER})
+    return child
+
+
 def api_tree(state: UiState, qs):
-    rel = qs.get('path', [''])[0]
+    """Lazy directory children, paginated (TZ 3.0 section 6.2).
+
+    ?path=<rel> &cursor=<int offset> &sort=name|size|problems
+    &sev=<csv severity filter>. Returns children (one page of
+    TREE_PAGE), next_cursor (None when done), total_entries,
+    returned_entries, complete, truncated (= not complete; the old
+    frontend "Show more" flag). Child counts are computed over ALL
+    findings, not over the page. Bad sort/cursor/sev values raise
+    ApiUsageError -> HTTP 400."""
+    rel = qs.get('path', [''])[0] or ''
+    sort = (qs.get('sort', ['name'])[0] or 'name').strip().lower()
+    if sort not in TREE_SORTS:
+        raise ApiUsageError('sort must be one of %s' % ', '.join(TREE_SORTS))
+    raw_cursor = qs.get('cursor', [None])[0]
+    if raw_cursor in (None, ''):
+        cursor = 0
+    else:
+        try:
+            cursor = int(raw_cursor)
+        except (TypeError, ValueError):
+            raise ApiUsageError('cursor must be an integer offset')
+        if cursor < 0:
+            raise ApiUsageError('cursor must be >= 0')
+    sev_raw = (qs.get('sev', [''])[0] or '').strip()
+    sev_keys = []
+    for tok in filter(None, (t.strip().lower() for t in sev_raw.split(','))):
+        if tok not in SEVERITY_ORDER:
+            raise ApiUsageError(
+                'sev must be a csv of %s' % ', '.join(SEVERITY_ORDER))
+        sev_keys.append(tok)
     try:
         target = _contain(state, rel)
     except (PermissionError, FileNotFoundError) as exc:
         return {'error': str(exc)}
     if not target.is_dir():
         return {'error': 'not a directory'}
-    children = []
     try:
-        entries = sorted(target.iterdir(), key=lambda p: (
-            not p.is_dir(), p.name.lower()))
+        with os.scandir(target) as it:
+            entries = list(it)
     except OSError as exc:
         return {'error': str(exc)}
-    for entry in entries[:MAX_TREE_CHILDREN]:
-        relpath = entry.relative_to(state.root).as_posix()
-        child = {
-            'name': entry.name,
-            'path': relpath,
-            'is_dir': entry.is_dir(),
-            'symlink': entry.is_symlink(),
-        }
-        try:
-            st = entry.stat()
-            if not child['is_dir']:
-                child['size'] = st.st_size
-                child['mtime'] = st.st_mtime
-        except OSError:
-            child['size'] = None
-        if child['is_dir']:
-            child['counts'] = _dir_counts(state, relpath)
-        else:
-            child['counts'] = state.counts.get(relpath,
-                                               {s: 0 for s in SEVERITY_ORDER})
-        children.append(child)
+    children = [_tree_child(state, e) for e in entries]
+    if sev_keys:
+        children = [c for c in children
+                    if sum(c['counts'].get(s, 0) for s in sev_keys) > 0]
+    if sort == 'name':
+        children.sort(key=lambda c: (not c['is_dir'], c['name'].casefold()))
+    elif sort == 'size':
+        # files by size desc first, then dirs by name
+        children.sort(key=lambda c: (c['is_dir'], -(c.get('size') or 0),
+                                     c['name'].casefold()))
+    else:  # problems: total count desc, dirs first on ties
+        children.sort(key=lambda c: (-sum(c['counts'].values()),
+                                     not c['is_dir'],
+                                     c['name'].casefold()))
+    total = len(children)
+    page = children[cursor:cursor + TREE_PAGE]
+    end = cursor + len(page)
+    next_cursor = end if end < total else None
     return {
         'path': rel,
-        'children': children,
-        'truncated': len(entries) > MAX_TREE_CHILDREN,
-        'counts': _dir_counts(state, rel),
+        'children': page,
+        'next_cursor': next_cursor,
+        'total_entries': total,
+        'returned_entries': len(page),
+        'complete': next_cursor is None,
+        'truncated': next_cursor is not None,
+        'counts': _dir_counts(state, rel.replace('\\', '/').strip('/')),
+    }
+
+
+# ------------------------------------------------- /api/tree/stats (6.3)
+
+def _stats_walk(start: Path, root: Path, build_root: bool = False) -> dict:
+    """Recursive size accounting with os.scandir (TZ 3.0 6.3).
+
+    Symlinks are skipped entirely (not followed, not counted: no
+    double counting, no cycles). Inaccessible directories are
+    collected as rel paths in 'inaccessible' and flip 'complete'.
+    build_root marks the start itself as a build directory (stats of
+    node_modules count everything inside as build bytes). The walk
+    also produces the cache fingerprint (max mtime over all entries
+    incl. dirs, file count, entry count)."""
+    acc = {'total_bytes': 0, 'total_files': 0, 'build_bytes': 0,
+           'inaccessible': [], 'nentries': 0, 'max_mtime': None}
+
+    def rec(dir_path: Path, under_build: bool):
+        try:
+            it = os.scandir(dir_path)
+        except OSError:
+            acc['inaccessible'].append(
+                dir_path.relative_to(root).as_posix())
+            return
+        with it:
+            for entry in it:
+                acc['nentries'] += 1
+                try:
+                    if entry.is_symlink():
+                        continue
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    acc['inaccessible'].append(
+                        Path(entry.path).relative_to(root).as_posix())
+                    continue
+                if acc['max_mtime'] is None or st.st_mtime > \
+                        acc['max_mtime']:
+                    acc['max_mtime'] = st.st_mtime
+                if is_dir:
+                    rec(Path(entry.path),
+                        under_build or entry.name in audit_scan.BUILD_DIRS)
+                else:
+                    acc['total_files'] += 1
+                    acc['total_bytes'] += st.st_size
+                    if under_build:
+                        acc['build_bytes'] += st.st_size
+
+    rec(start, build_root)
+    acc['complete'] = not acc['inaccessible']
+    acc['fingerprint'] = (acc['max_mtime'], acc['total_files'],
+                          acc['nentries'])
+    return acc
+
+
+def _problem_files_bytes(state: UiState, rel_key: str) -> int:
+    """Sum of on-disk sizes of counted files under rel_key ('' = all).
+    Vanished or unreadable files are skipped, not guessed."""
+    prefix = '' if rel_key == '' else rel_key + '/'
+    total = 0
+    for rel in state.counts:
+        if rel_key != '' and not rel.startswith(prefix):
+            continue
+        p = state.root / rel
+        try:
+            if os.path.islink(p):
+                continue
+            st = os.stat(p, follow_symlinks=False)
+        except OSError:
+            continue
+        total += st.st_size
+    return total
+
+
+def api_tree_stats(state: UiState, qs):
+    """Exact recursive sizes for one directory (TZ 3.0 section 6.3).
+
+    Cached in UiState._stats_cache keyed by rel path; every request
+    re-probes the directory fingerprint (max mtime, nfiles, nentries)
+    and a mismatch recomputes. POST /api/rescan clears the cache.
+    share_of_root_percent is relative to the workspace root (the root
+    itself reports 100.0); its denominator comes from the cached root
+    stats when available."""
+    rel = qs.get('path', [''])[0] or ''
+    key = rel.replace('\\', '/').strip('/')
+    try:
+        target = _contain(state, rel)
+    except (PermissionError, FileNotFoundError) as exc:
+        return {'error': str(exc)}
+    if not target.is_dir():
+        return {'error': 'not a directory'}
+    raw = _stats_walk(target, state.root,
+                      build_root=key != ''
+                      and Path(key).name in audit_scan.BUILD_DIRS)
+    with state.lock:
+        hit = state._stats_cache.get(key)
+    if hit is not None and hit[0] == raw['fingerprint']:
+        return hit[1]          # same object: callers see a stable hit
+    if key == '':
+        share = 100.0
+    else:
+        with state.lock:
+            root_hit = state._stats_cache.get('')
+        if root_hit is not None:
+            root_total = root_hit[1]['total_bytes']
+        else:
+            root_total = _stats_walk(state.root, state.root)['total_bytes']
+        share = round(100.0 * raw['total_bytes'] / root_total, 2) \
+            if root_total else 0.0
+    result = {
+        'path': key,
+        'total_bytes': raw['total_bytes'],
+        'total_files': raw['total_files'],
+        'problem_files_bytes': _problem_files_bytes(state, key),
+        'build_bytes': raw['build_bytes'],
+        'share_of_root_percent': share,
+        'complete': raw['complete'],
+        'inaccessible': raw['inaccessible'],
+        'computed_at': datetime.now().astimezone().isoformat(
+            timespec='seconds'),
+    }
+    with state.lock:
+        state._stats_cache[key] = (raw['fingerprint'], result)
+    return result
+
+
+# ---------------------------------------------------- /api/search (6.2)
+
+def api_search(state: UiState, qs):
+    """Server-side name search over the whole workspace (TZ 3.0 6.2):
+    the frontend is no longer limited to the loaded tree. Substring
+    match on entry names, casefolded both ways; directories get
+    prefix-aggregated counts like _dir_counts. The walk is capped at
+    SEARCH_SCAN_CAP entries; hitting the cap (or the limit) sets
+    truncated. Only names/paths leave the server: no secrets."""
+    q = (qs.get('q', [''])[0] or '')
+    if not q.strip():
+        raise ApiUsageError('q required')
+    raw_limit = qs.get('limit', [str(SEARCH_LIMIT_DEFAULT)])[0]
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        raise ApiUsageError('limit must be an integer')
+    if limit < 1:
+        raise ApiUsageError('limit must be >= 1')
+    limit = min(limit, SEARCH_LIMIT_MAX)
+    needle = q.casefold()
+    matches = []
+    visited = 0
+    capped = False
+    stack = [state.root]
+    while stack and not capped:
+        dir_path = stack.pop()
+        try:
+            it = os.scandir(dir_path)
+        except OSError:
+            continue
+        with it:
+            for entry in it:
+                visited += 1
+                if visited > SEARCH_SCAN_CAP:
+                    capped = True
+                    break
+                try:
+                    if needle in entry.name.casefold():
+                        relpath = Path(entry.path).relative_to(
+                            state.root).as_posix()
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                        if is_dir:
+                            counts = _dir_counts(state, relpath)
+                        else:
+                            counts = state.counts.get(
+                                relpath,
+                                {s: 0 for s in SEVERITY_ORDER})
+                        matches.append({'path': relpath, 'is_dir': is_dir,
+                                        'counts': counts})
+                    if (not entry.is_symlink()) \
+                            and entry.is_dir(follow_symlinks=False):
+                        stack.append(Path(entry.path))
+                except OSError:
+                    continue
+    matches.sort(key=lambda m: m['path'])
+    return {
+        'matches': matches[:limit],
+        'total_matches': len(matches),
+        'truncated': len(matches) > limit or capped,
     }
 
 
@@ -507,6 +775,10 @@ def make_handler(state: UiState, token: str | None = None):
                     self._json(obj if obj is not None
                                else {'error': 'finding not found'}, 200
                                if obj else 404)
+                elif route == '/api/tree/stats':
+                    self._json(api_tree_stats(state, qs))
+                elif route == '/api/search':
+                    self._json(api_search(state, qs))
                 elif route == '/api/tree':
                     self._json(api_tree(state, qs))
                 elif route == '/api/file':
@@ -523,6 +795,8 @@ def make_handler(state: UiState, token: str | None = None):
                     self._json({'error': 'no such route'}, 404)
             except BrokenPipeError:
                 pass
+            except ApiUsageError as exc:
+                self._json({'error': str(exc)}, 400)
             except Exception as exc:  # never leak a traceback to the wire
                 self._json({'error': 'internal: %s' % exc}, 500)
 

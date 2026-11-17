@@ -174,7 +174,11 @@ Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix
 cd qa && python eval.py
 ```
 
-Three scenario fixtures with expected results locked in `expected.json` before the run; the runner compares the scanner's actual JSON against the expected one and writes a report. Current result: 77/77 (plus a 360+ test unit/integration/security suite; see `qa/QA-EVAL-*.md`).
+Scenario fixtures with expected results locked before the run; the runner compares the scanner's actual JSON against the locked expectations and writes a report. The current numbers live in the generated line below — never edited by hand (`python tools/check_readme_facts.py`, staleness-gated in CI).
+
+<!-- facts-begin -->
+**Facts:** 1070 tests · QA eval 267 PASS · deterministic scanner, no dependencies
+<!-- facts-end -->
 
 The deterministic core also has a unit and security-regression suite:
 

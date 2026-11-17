@@ -1,6 +1,13 @@
-/* agents-doctor — Visual Workspace Explorer, phases V1+V2.
+/* agents-doctor — Visual Workspace Explorer, phases V1+V2+V3.
    Vanilla JS, zero dependencies, fully offline. Served by ui/server.py;
-   see the API contract in that file's docstring. */
+   see the API contract in that file's docstring.
+
+   V3 scale features (TZ 3.0 sections 6.4-6.5): virtualized tree window,
+   cursor pagination with "+N more…" sentinels, whole-workspace search,
+   exact directory sizes for the Disk metric via /api/tree/stats, tree
+   sorting by name/size/problems. All new endpoints are optional: when
+   /api/tree answers without cursor keys the UI stays on the old
+   single-chunk behavior and never calls the new endpoints. */
 (() => {
 'use strict';
 
@@ -145,14 +152,20 @@ const state = {
     loadedOnce: false,
   },
   tree: {
-    cache: new Map(),           // rel -> {children, truncated, loading, error}
+    cache: new Map(),           // rel -> {children, nextCursor, totalEntries, complete, truncated, loading, loadingMore, error}
     expanded: new Set(),
     filter: '', sort: 'name',
     loadedOnce: false, focusedPath: null, seq: 0, currentDir: '',
+    pagedApi: false,            // true once /api/tree answers with cursor/complete keys
+    flat: false, flatRows: null, focusIdx: null,
+    searchResults: null,
   },
   treemap: {
     metric: 'density', zoom: '', loadedOnce: false, nodes: new Map(), resizing: false,
     selected: null,   // path of the selected cell; survives zoom and tab switches
+    stats: new Map(),           // path -> {totalBytes, totalFiles, problemBytes, share, complete}
+    statsPending: new Map(),    // path -> promise, while /api/tree/stats is in flight
+    statsGen: 0,                // bumped by rescan; stale responses drop themselves
   },
   simulate: { result: null, harness: '' },
   instructions: null,
@@ -321,14 +334,48 @@ function renderOverview() {
 
 /* ------------------------------------------------------------------- tree */
 
+/* V3 scale model.
+   - loadDir() speaks the paged contract (cursor/complete/total_entries)
+     and degrades to the old single-chunk response transparently: no
+     cursor keys -> complete listing, no sentinels, exactly the V2 flow.
+   - Below TREE_DOM_CAP visible rows the tree renders nested DOM as
+     before, with incremental expand/collapse (patchDirNode patches one
+     subtree in place, scroll position untouched). Above the cap the
+     visible tree is flattened into a virtual list: absolutely
+     positioned rows, only the viewport window (+overscan) in the DOM.
+   - Directories with an unresolved next_cursor end with a "+N more…"
+     sentinel row; IntersectionObserver (nested) or the window render
+     (flat) fetches the next page when it comes near the viewport.
+   - The page cache is an LRU capped at TREE_LRU_CAP directories;
+     the root, expanded chains and the treemap zoom chain stay pinned. */
+
+const TREE_ROW_H = 22;        // fixed row height in flat (virtualized) mode
+const TREE_OVERSCAN = 10;     // rows rendered above/below the viewport
+const TREE_DOM_CAP = 500;     // live .tree-node-row limit -> go virtual
+const TREE_FLAT_EXIT = 420;   // hysteresis: leave flat mode below this
+const TREE_LRU_CAP = 50;      // cached directory listings
+
 async function loadDir(rel) {
   const entry = state.tree.cache.get(rel);
-  if (entry && (entry.children || entry.error)) return entry;
+  if (entry && (entry.children || entry.error)) {
+    cacheTouch(rel);
+    return entry;
+  }
   state.tree.cache.set(rel, { loading: true });
   try {
-    const data = await api('/api/tree', { path: rel });
-    const e = { children: data.children || [], truncated: !!data.truncated };
+    const data = await api('/api/tree', { path: rel, sort: state.tree.sort });
+    if (data.next_cursor !== undefined || data.complete !== undefined) {
+      state.tree.pagedApi = true;    // new backend: stats + search exist too
+    }
+    const e = {
+      children: data.children || [],
+      truncated: !!data.truncated,
+      nextCursor: data.next_cursor !== undefined ? data.next_cursor : null,
+      totalEntries: data.total_entries != null ? Number(data.total_entries) : null,
+      complete: data.complete !== undefined ? !!data.complete : !data.truncated,
+    };
     state.tree.cache.set(rel, e);
+    cacheEvict();
     return e;
   } catch (err) {
     const e = { error: err.message };
@@ -337,8 +384,39 @@ async function loadDir(rel) {
   }
 }
 
+/* Simple LRU over the page cache: Map insertion order is recency. */
+function cacheTouch(rel) {
+  const cache = state.tree.cache;
+  if (!cache.has(rel)) return;
+  const v = cache.get(rel);
+  cache.delete(rel);
+  cache.set(rel, v);
+}
+function cacheEvict() {
+  const cache = state.tree.cache;
+  if (cache.size <= TREE_LRU_CAP) return;
+  const pinned = new Set(['']);
+  const addChain = (p) => {
+    if (!p) return;
+    let cur = '';
+    for (const seg of p.split('/').filter(Boolean)) {
+      cur = cur ? cur + '/' + seg : seg;
+      pinned.add(cur);
+    }
+  };
+  for (const p of state.tree.expanded) addChain(p);
+  addChain(state.tree.currentDir);
+  addChain(state.treemap.zoom);
+  for (const key of Array.from(cache.keys())) {
+    if (cache.size <= TREE_LRU_CAP) break;
+    if (key === '' || pinned.has(key)) continue;
+    cache.delete(key);
+  }
+}
+
 async function initTree() {
   await loadDir('');
+  state.tree.loadedOnce = true;
   renderTree();
 }
 
@@ -347,9 +425,39 @@ function nodeActiveTotal(child) {
   return countsTotal(c);
 }
 
+function cmpName(a, b) {
+  const x = a.name.toLowerCase(), y = b.name.toLowerCase();
+  return x < y ? -1 : x > y ? 1 : 0;
+}
 function sortByName(a, b) {
   if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-  return a.name.localeCompare(b.name);
+  return cmpName(a, b);
+}
+
+/* Client-side mirror of the server sort (the sort param is sent on every
+   /api/tree call so pages arrive consistently ordered; already loaded
+   pages are re-sorted here). Mirrors api_tree(): size = files by size
+   desc, then dirs by name; problems adds a dirs-first tiebreak. The
+   problems axis counts only severities enabled in the chips — the
+   filtered view is the point of the client-side count. */
+function sortChildren(children) {
+  if (state.tree.sort === 'problems') {
+    return children.slice().sort((a, b) =>
+      (nodeActiveTotal(b) - nodeActiveTotal(a)) ||
+      (a.is_dir === b.is_dir ? cmpName(a, b) : (a.is_dir ? -1 : 1)));
+  }
+  if (state.tree.sort === 'size') {
+    return children.slice().sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? 1 : -1;
+      if (!a.is_dir) {
+        const sa = a.size != null ? a.size : -1;
+        const sb = b.size != null ? b.size : -1;
+        if (sb !== sa) return sb - sa;
+      }
+      return cmpName(a, b);
+    });
+  }
+  return children.slice().sort(sortByName);
 }
 
 function childMatchesFilter(child) {
@@ -363,48 +471,117 @@ function childMatchesFilter(child) {
   return false;
 }
 
+/* Flat model of everything currently visible: node rows plus "+N more…"
+   sentinels and truncation notes as marker rows. Drives both the DOM
+   cap decision and the flat (virtualized) renderer. */
+function computeRowModel() {
+  const rows = [];
+  const walk = (children, depth) => {
+    for (const child of sortChildren(children)) {
+      if (state.tree.filter && !childMatchesFilter(child)) continue;
+      rows.push({ child, depth });
+      if (child.is_dir && state.tree.expanded.has(child.path)) {
+        const entry = state.tree.cache.get(child.path);
+        if (entry && entry.children) {
+          walk(entry.children, depth + 1);
+          appendDirTail(rows, entry, child.path, depth + 1);
+        }
+      }
+    }
+  };
+  const root = state.tree.cache.get('');
+  if (root && root.children) {
+    walk(root.children, 0);
+    appendDirTail(rows, root, '', 0);
+  }
+  return rows;
+}
+
+function appendDirTail(rows, entry, path, depth) {
+  if (entry.nextCursor) rows.push({ more: path, entry, depth });
+  else if (!entry.complete) rows.push({ truncNote: true, depth });
+}
+
+function updateTreeCount(shown, total) {
+  const c = $('tree-count');
+  if (c) c.textContent = total > 0 ? `shown ${shown} of ${total}` : '';
+}
+
+function updateTreeCountAll() {
+  const rows = computeRowModel();
+  updateTreeCount(rows.length, rows.length);
+}
+
 function renderTree() {
   const body = $('tree-body');
-  body.textContent = '';
+  const rows = computeRowModel();
+  const goFlat = rows.length > TREE_DOM_CAP ||
+    (state.tree.flat && rows.length > TREE_FLAT_EXIT);
+  if (goFlat) {
+    state.tree.flat = true;
+    renderTreeFlat(rows);
+    return;
+  }
+  state.tree.flat = false;
+  state.tree.flatRows = null;
   const rootEntry = state.tree.cache.get('');
+  body.textContent = '';
   if (!rootEntry || !rootEntry.children) {
+    if (rootEntry && rootEntry.error) {
+      body.append(errorPanel(new Error(rootEntry.error), async () => {
+        state.tree.cache.delete('');
+        await initTree();
+      }));
+      return;
+    }
     body.innerHTML = loadingHTML('Loading tree…');
+    return;
+  }
+  if (!rows.length) {
+    body.innerHTML = emptyHTML(state.tree.filter
+      ? 'No visible nodes match the name filter.'
+      : 'Workspace root is empty.');
+    updateTreeCount(0, 0);
     return;
   }
   const frag = document.createDocumentFragment();
   buildChildren(frag, rootEntry.children, 0);
-  if (!frag.childNodes.length) {
-    body.innerHTML = emptyHTML(state.tree.filter
-      ? 'No visible nodes match the name filter.'
-      : 'Workspace root is empty.');
-    return;
-  }
   body.append(frag);
-  if (rootEntry.truncated) {
-    body.append(el('div', { class: 'tree-truncated', text: 'listing truncated: directory has more than 2000 entries' }));
+  if (rootEntry.nextCursor) {
+    body.append(moreRowEl('', rootEntry, 0));
+  } else if (!rootEntry.complete) {
+    body.append(el('div', {
+      class: 'tree-truncated',
+      text: 'listing truncated: directory has more entries on disk',
+    }));
   }
+  observeMoreRows(body);
+  updateTreeCount(rows.length, rows.length);
   restoreTreeFocus();
 }
 
 function buildChildren(container, children, depth) {
-  const sorted = state.tree.sort === 'problems'
-    ? children.slice().sort((a, b) => (nodeActiveTotal(b) - nodeActiveTotal(a)) || a.name.localeCompare(b.name))
-    : children.slice().sort(sortByName);
-  for (const child of sorted) {
+  for (const child of sortChildren(children)) {
     if (state.tree.filter && !childMatchesFilter(child)) continue;
     container.append(buildNode(child, depth));
   }
 }
 
 function buildNode(child, depth) {
+  const wrap = el('div', { class: 'tree-branch', 'data-path': child.path });
+  wrap.append(buildRowEl(child, depth));
+  if (child.is_dir && state.tree.expanded.has(child.path)) {
+    wrap.append(childrenContainerFor(child.path, depth));
+  }
+  return wrap;
+}
+
+/* The row markup, shared by the nested renderer (rows inside
+   .tree-branch wrappers) and the flat virtualized renderer. */
+function buildRowEl(child, depth) {
   const expanded = state.tree.expanded.has(child.path);
   const active = countsFiltered(child.counts || {});
   const total = countsTotal(active);
-  const wrap = el('div', { class: 'tree-branch', 'data-path': child.path });
-
-  const twister = child.is_dir ? (expanded ? '\u25be' : '\u25b8') : '';
-  const iconTxt = child.is_dir ? 'dir' : 'file';
-
   const row = el('div', {
     class: 'tree-node-row' + (total > 0 ? ' has-problems' : '') +
       (total > 0 && !child.is_dir ? ' is-flagged' : '') +
@@ -412,14 +589,15 @@ function buildNode(child, depth) {
     role: 'treeitem',
     'data-path': child.path,
     'data-isdir': String(!!child.is_dir),
+    'data-depth': String(depth),
     tabindex: '-1',
     id: 'tn-' + (state.tree.seq++),
     'aria-expanded': child.is_dir ? String(expanded) : null,
     'aria-selected': 'false',
   });
   row.append(
-    el('span', { class: 'tree-twister', 'aria-hidden': 'true', text: twister || ' ' }),
-    el('span', { class: 'tree-icon', 'aria-hidden': 'true', text: iconTxt }),
+    el('span', { class: 'tree-twister', 'aria-hidden': 'true', text: child.is_dir ? (expanded ? '\u25be' : '\u25b8') : '' }),
+    el('span', { class: 'tree-icon', 'aria-hidden': 'true', text: child.is_dir ? 'dir' : 'file' }),
   );
   const nameSpan = el('span', { class: 'tree-name', text: child.name });
   row.append(nameSpan);
@@ -427,68 +605,295 @@ function buildNode(child, depth) {
     row.append(el('span', { class: 'tree-symlink', title: 'symbolic link', text: 'symlink \u21aa' }));
   }
   if (total > 0) row.append(badgeRowFromCounts(child.counts));
-  wrap.append(row);
 
   row.addEventListener('click', () => {
     setTreeFocus(row);
-    if (child.is_dir) {
-      toggleDir(child.path);
-    } else {
-      openInspector(child.path, null, { push: true });
-    }
+    if (child.is_dir) toggleDir(child.path);
+    else openInspector(child.path, null, { push: true });
   });
+  return row;
+}
 
-  if (child.is_dir && expanded) {
-    const entry = state.tree.cache.get(child.path);
-    const kids = el('div', { class: 'tree-children', role: 'group' });
-    if (!entry || entry.loading) {
-      kids.append(el('div', { class: 'tree-truncated', text: 'loading…' }));
-    } else if (entry.error) {
-      const errRow = el('div', { class: 'tree-truncated' });
-      errRow.append(
-        el('span', { text: 'error: ' + entry.error + ' ' }),
-        el('button', {
-          class: 'ev-link', text: 'retry',
-          onclick: async (ev2) => {
-            ev2.stopPropagation();
-            state.tree.cache.delete(child.path);
-            await loadDir(child.path);
-            renderTree();
-          },
-        }),
-      );
-      kids.append(errRow);
-    } else if (!entry.children.length) {
-      kids.append(el('div', { class: 'tree-truncated', text: '(empty)' }));
-    } else {
-      buildChildren(kids, entry.children, depth + 1);
-      if (entry.truncated) {
-        kids.append(el('div', { class: 'tree-truncated', text: 'listing truncated (2000+)' }));
+function childrenContainerFor(path, depth) {
+  const kids = el('div', { class: 'tree-children', role: 'group' });
+  fillChildrenContainer(kids, path, depth);
+  return kids;
+}
+
+/* (Re)builds one directory's child list: rows, then the pagination
+   sentinel or the truncation note. Called on expand, retry and after
+   every appended page — never rebuilds anything above this container. */
+function fillChildrenContainer(kids, path, depth) {
+  kids.textContent = '';
+  const entry = state.tree.cache.get(path);
+  if (!entry || entry.loading) {
+    kids.append(el('div', { class: 'tree-truncated', text: 'loading…' }));
+    return;
+  }
+  if (entry.error) {
+    kids.append(dirErrorRow(path));
+    return;
+  }
+  if (!entry.children.length) {
+    kids.append(el('div', { class: 'tree-truncated', text: '(empty)' }));
+    return;
+  }
+  buildChildren(kids, entry.children, depth + 1);
+  if (entry.nextCursor) kids.append(moreRowEl(path, entry, depth + 1));
+  else if (!entry.complete) {
+    kids.append(el('div', {
+      class: 'tree-truncated',
+      text: 'listing truncated: directory has more entries on disk',
+    }));
+  }
+}
+
+function dirErrorRow(path) {
+  const entry = state.tree.cache.get(path) || {};
+  const errRow = el('div', { class: 'tree-truncated' });
+  errRow.append(el('span', { text: 'error: ' + (entry.error || 'load failed') + ' ' }));
+  errRow.append(el('button', {
+    class: 'ev-link', text: 'retry',
+    onclick: async (ev2) => {
+      ev2.stopPropagation();
+      state.tree.cache.delete(path);
+      if (state.tree.expanded.has(path)) {
+        patchDirNode(path);
+        await loadDir(path);
+        patchDirNode(path);
+      }
+    },
+  }));
+  return errRow;
+}
+
+/* "+N more…" sentinel for cursor pagination. Click or scroll-near (see
+   observeMoreRows / the flat window render) fetches the next page. */
+function moreRowEl(dirPath, entry, depth) {
+  const remaining = entry.totalEntries != null
+    ? Math.max(0, entry.totalEntries - entry.children.length)
+    : null;
+  const row = el('div', {
+    class: 'tree-more-row',
+    role: 'button',
+    tabindex: '0',
+    'data-more': dirPath,
+    title: 'load the next page of entries',
+  });
+  row.style.display = 'flex';
+  row.style.alignItems = 'center';
+  row.style.cursor = 'pointer';
+  row.style.paddingLeft = (depth * 16 + 22) + 'px';
+  row.append(el('span', {
+    class: 'tree-truncated',
+    text: entry.loadingMore ? 'loading more…'
+      : remaining != null ? `+${remaining} more…` : '+ more…',
+  }));
+  row.addEventListener('click', () => loadMore(dirPath));
+  row.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); loadMore(dirPath); }
+  });
+  return row;
+}
+
+async function loadMore(dir) {
+  const entry = state.tree.cache.get(dir);
+  if (!entry || !entry.children || entry.loadingMore || !entry.nextCursor) return;
+  entry.loadingMore = true;
+  refreshMoreRows(dir);
+  try {
+    const data = await api('/api/tree', { path: dir, cursor: entry.nextCursor, sort: state.tree.sort });
+    const seen = new Set(entry.children.map((c) => c.path));
+    for (const c of data.children || []) {
+      if (!seen.has(c.path)) {
+        entry.children.push(c);
+        seen.add(c.path);
       }
     }
-    wrap.append(kids);
+    entry.nextCursor = data.next_cursor !== undefined ? data.next_cursor : null;
+    if (data.total_entries != null) entry.totalEntries = Number(data.total_entries);
+    if (data.complete !== undefined) entry.complete = !!data.complete;
+  } catch (err) {
+    toast('Failed to load more entries: ' + err.message);
+  } finally {
+    entry.loadingMore = false;
+    cacheTouch(dir);
+    afterChildrenChanged(dir);
   }
-  return wrap;
+}
+
+function refreshMoreRows(dir) {
+  const entry = state.tree.cache.get(dir);
+  for (const m of $('tree-body').querySelectorAll('[data-more="' + CSS.escape(dir) + '"]')) {
+    const span = m.querySelector('.tree-truncated');
+    if (span && entry) {
+      span.textContent = entry.loadingMore ? 'loading more…' : '+ more…';
+    }
+  }
+}
+
+function afterChildrenChanged(dir) {
+  if (dir === '' || state.tree.flat || computeRowModel().length > TREE_DOM_CAP) {
+    renderTree();
+    return;
+  }
+  const body = $('tree-body');
+  const wrap = body.querySelector('.tree-branch[data-path="' + CSS.escape(dir) + '"]');
+  if (!wrap) {
+    updateTreeCountAll();
+    return;
+  }
+  const kids = wrap.querySelector(':scope > .tree-children');
+  if (kids) {
+    const row = wrap.querySelector(':scope > .tree-node-row');
+    fillChildrenContainer(kids, dir, Number(row && row.dataset ? row.dataset.depth : 0) || 0);
+  }
+  observeMoreRows(body);
+  updateTreeCountAll();
 }
 
 async function toggleDir(path) {
   state.tree.currentDir = path;
   renderSimTargetChips();
-  if (state.tree.expanded.has(path)) {
-    state.tree.expanded.delete(path);
+  const collapsing = state.tree.expanded.has(path);
+  if (collapsing) state.tree.expanded.delete(path);
+  else state.tree.expanded.add(path);
+  const entry = state.tree.cache.get(path);
+  const needLoad = !collapsing && (!entry || (!entry.children && !entry.loading && !entry.error));
+  patchDirNode(path);
+  if (needLoad) {
+    await loadDir(path);
+    patchDirNode(path);
+  }
+}
+
+/* Expand/collapse patches the one affected subtree in place; the rest of
+   the DOM and the scroll position stay untouched. Falls back to a full
+   re-render when flat mode engages or the row is not in the DOM
+   (filtered out, or the parent chain is collapsed). */
+function patchDirNode(path) {
+  if (state.tree.flat || computeRowModel().length > TREE_DOM_CAP) {
     renderTree();
     return;
   }
-  state.tree.expanded.add(path);
-  const entry = state.tree.cache.get(path);
-  if (!entry || (!entry.children && !entry.loading && !entry.error)) {
-    renderTree();                       // show the loading row
-    await loadDir(path);
+  const body = $('tree-body');
+  const wrap = body.querySelector('.tree-branch[data-path="' + CSS.escape(path) + '"]');
+  if (!wrap) {
+    updateTreeCountAll();
+    return;
   }
-  renderTree();
+  const row = wrap.querySelector(':scope > .tree-node-row');
+  const expanded = state.tree.expanded.has(path);
+  const tw = row.querySelector(':scope > .tree-twister');
+  if (tw) tw.textContent = expanded ? '\u25be' : '\u25b8';
+  row.setAttribute('aria-expanded', String(expanded));
+  let kids = wrap.querySelector(':scope > .tree-children');
+  if (!expanded) {
+    if (kids) kids.remove();
+    updateTreeCountAll();
+    return;
+  }
+  if (!kids) {
+    kids = el('div', { class: 'tree-children', role: 'group' });
+    wrap.append(kids);
+  }
+  fillChildrenContainer(kids, path, Number(row.dataset.depth || 0));
+  observeMoreRows(body);
+  updateTreeCountAll();
 }
 
-/* tree keyboard navigation */
+/* Sentinel watcher for the nested mode: fetch the next page when a
+   "+N more…" row comes within 300px of the viewport. */
+let treeIO = null;
+function observeMoreRows(scope) {
+  if (!('IntersectionObserver' in window)) return;
+  if (!treeIO) {
+    treeIO = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (en.isIntersecting) {
+          treeIO.unobserve(en.target);
+          loadMore(en.target.getAttribute('data-more'));
+        }
+      }
+    }, { root: $('tree-body'), rootMargin: '300px' });
+  }
+  treeIO.disconnect();
+  for (const m of scope.querySelectorAll('[data-more]')) treeIO.observe(m);
+}
+
+/* --------------------------- flat (virtualized) rendering ---------------- */
+
+function renderTreeFlat(rows) {
+  const body = $('tree-body');
+  body.textContent = '';
+  const inner = el('div', {});
+  inner.id = 'tree-flat-inner';
+  inner.style.position = 'relative';
+  inner.style.height = Math.max(rows.length * TREE_ROW_H, body.clientHeight || 0) + 'px';
+  body.append(inner);
+  state.tree.flatRows = rows;
+  renderTreeWindow();
+}
+
+/* Renders only the viewport window (+overscan) of the flat row model.
+   Sentinel rows inside the window trigger their page load here; the
+   freshly appended page pushes the next sentinel ~500 rows down, so the
+   chain stops by itself once the user stops scrolling. */
+function renderTreeWindow() {
+  const body = $('tree-body');
+  const inner = $('tree-flat-inner');
+  const rows = state.tree.flatRows;
+  if (!inner || !rows || !rows.length) return;
+  const y0 = inner.offsetTop;
+  const vh = body.clientHeight || 480;
+  const start = Math.max(0, Math.floor((body.scrollTop - y0) / TREE_ROW_H) - TREE_OVERSCAN);
+  const end = Math.min(rows.length,
+    start + Math.ceil(vh / TREE_ROW_H) + 2 * TREE_OVERSCAN + 1);
+  const frag = document.createDocumentFragment();
+  for (let i = start; i < end; i++) frag.append(flatRowEl(rows[i], i));
+  inner.textContent = '';
+  inner.append(frag);
+  updateTreeCount(end - start, rows.length);
+  for (let i = start; i < end; i++) {
+    if (rows[i].more && !rows[i].entry.loadingMore) loadMore(rows[i].more);
+  }
+  restoreTreeFocus();
+}
+
+function flatRowEl(modelRow, idx) {
+  let row;
+  if (modelRow.more) {
+    row = moreRowEl(modelRow.more, modelRow.entry, modelRow.depth);
+  } else if (modelRow.truncNote) {
+    row = el('div', {
+      class: 'tree-truncated',
+      text: 'listing truncated: directory has more entries on disk',
+    });
+    row.style.paddingLeft = ((modelRow.depth || 0) * 16 + 22) + 'px';
+  } else {
+    row = buildRowEl(modelRow.child, modelRow.depth);
+    row.style.paddingLeft = (modelRow.depth * 16 + 4) + 'px';
+    row.dataset.flatIdx = String(idx);
+  }
+  row.style.position = 'absolute';
+  row.style.top = (idx * TREE_ROW_H) + 'px';
+  row.style.left = '0';
+  row.style.right = '0';
+  row.style.height = TREE_ROW_H + 'px';
+  row.style.overflow = 'hidden';
+  return row;
+}
+
+let treeScrollRaf = 0;
+function onTreeScroll() {
+  if (!state.tree.flat || treeScrollRaf) return;
+  treeScrollRaf = requestAnimationFrame(() => {
+    treeScrollRaf = 0;
+    if (state.tree.flat) renderTreeWindow();
+  });
+}
+
+/* tree keyboard navigation (nested: DOM rows; flat: row model + window) */
 function visibleTreeRows() {
   return Array.from($('tree-body').querySelectorAll('.tree-node-row'));
 }
@@ -502,6 +907,7 @@ function setTreeFocus(row) {
     row.setAttribute('aria-selected', 'true');
     row.scrollIntoView({ block: 'nearest' });
     state.tree.focusedPath = row.getAttribute('data-path');
+    if (row.dataset.flatIdx != null) state.tree.focusIdx = Number(row.dataset.flatIdx);
   }
 }
 function restoreTreeFocus() {
@@ -511,6 +917,10 @@ function restoreTreeFocus() {
 }
 
 function treeKeydown(ev) {
+  if (state.tree.flat) {
+    treeKeydownFlat(ev);
+    return;
+  }
   const rows = visibleTreeRows();
   if (!rows.length) return;
   const key = ev.key;
@@ -538,6 +948,195 @@ function treeKeydown(ev) {
   if (key === 'Enter') {
     if (isDir) toggleDir(path);
     else openInspector(path, null, { push: true });
+  }
+}
+
+/* Keyboard over the flat model: the focused row may not be in the DOM
+   yet, so navigation moves an index and re-renders the window around it. */
+function treeKeydownFlat(ev) {
+  const rows = state.tree.flatRows || [];
+  if (!rows.length) return;
+  const key = ev.key;
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Home', 'End'].includes(key)) return;
+  ev.preventDefault();
+  const body = $('tree-body');
+  const ensureVisible = (idx) => {
+    const y = idx * TREE_ROW_H;
+    if (y < body.scrollTop) body.scrollTop = y;
+    else if (y + TREE_ROW_H > body.scrollTop + body.clientHeight) {
+      body.scrollTop = y + TREE_ROW_H - body.clientHeight;
+    }
+  };
+  const goto = (idx) => {
+    state.tree.focusIdx = idx;
+    ensureVisible(idx);
+    renderTreeWindow();
+    focusFlatIdx(idx);
+  };
+  let i = state.tree.focusIdx;
+  if (i == null || i < 0 || i >= rows.length) {
+    i = rows.findIndex((r) => r.child && r.child.path === state.tree.focusedPath);
+  }
+  if (i < 0) i = 0;
+  if (key === 'Home') { goto(0); return; }
+  if (key === 'End') { goto(rows.length - 1); return; }
+  if (key === 'ArrowDown') { goto(Math.min(i + 1, rows.length - 1)); return; }
+  if (key === 'ArrowUp') { goto(Math.max(i - 1, 0)); return; }
+  const m = rows[i];
+  if (!m || !m.child) return;
+  const child = m.child;
+  if (key === 'ArrowRight' && child.is_dir && !state.tree.expanded.has(child.path)) {
+    toggleDir(child.path);
+    return;
+  }
+  if (key === 'ArrowLeft' && child.is_dir && state.tree.expanded.has(child.path)) {
+    toggleDir(child.path);
+    return;
+  }
+  if (key === 'ArrowLeft') {
+    const pi = rows.findIndex((r) => r.child && r.child.path === dirname(child.path));
+    if (pi >= 0) goto(pi);
+    return;
+  }
+  if (key === 'Enter') {
+    if (child.is_dir) toggleDir(child.path);
+    else openInspector(child.path, null, { push: true });
+  }
+}
+
+function focusFlatIdx(idx) {
+  const row = $('tree-body').querySelector('.tree-node-row[data-flat-idx="' + idx + '"]');
+  if (row) setTreeFocus(row);
+}
+
+/* --------------------------------------------------- workspace search (V3) */
+
+/* The tree search box doubles as a whole-workspace search when the scope
+   select says so. Only the new backend (/api/search) can serve it; on
+   the old server the scope falls back to the in-loaded name filter with
+   an inline note instead of a request. */
+let searchTimer = null;
+
+function hideSearchResults() {
+  const box = $('tree-search-results');
+  if (!box) return;
+  box.hidden = true;
+  box.textContent = '';
+}
+
+function showSearchNote(msg) {
+  const box = $('tree-search-results');
+  if (!box) return;
+  box.textContent = '';
+  box.hidden = false;
+  box.append(el('div', { class: 'tree-truncated', text: msg }));
+}
+
+function onTreeSearchInput() {
+  state.tree.filter = $('tree-search').value.trim();
+  clearTimeout(searchTimer);
+  const workspace = $('tree-search-scope').value === 'workspace';
+  if (workspace && state.tree.filter) {
+    if (state.tree.pagedApi) {
+      showSearchNote('searching "' + state.tree.filter + '" across the workspace…');
+      searchTimer = setTimeout(runWorkspaceSearch, 300);
+    } else {
+      showSearchNote('whole-workspace search needs the updated server API; filtering loaded nodes instead');
+    }
+  } else {
+    hideSearchResults();
+  }
+  renderTree();
+}
+
+async function runWorkspaceSearch() {
+  const q = state.tree.filter;
+  if (!q || $('tree-search-scope').value !== 'workspace' || !state.tree.pagedApi) return;
+  try {
+    const data = await api('/api/search', { q, limit: 100 });
+    if (state.tree.filter !== q || $('tree-search-scope').value !== 'workspace') return;
+    state.tree.searchResults = data || { matches: [] };
+    renderSearchResults();
+  } catch (e) {
+    showSearchNote('workspace search failed: ' + e.message);
+  }
+}
+
+function renderSearchResults() {
+  const box = $('tree-search-results');
+  const data = state.tree.searchResults || {};
+  const matches = data.matches || [];
+  box.textContent = '';
+  box.hidden = false;
+  const total = data.total_matches != null ? data.total_matches : matches.length;
+  box.append(el('div', {
+    class: 'tree-truncated',
+    text: `${total} match(es) across the workspace` +
+      (data.truncated && matches.length ? ` — first ${matches.length} shown` : '') +
+      '. Click a result to reveal it in the tree.',
+  }));
+  if (!matches.length) return;
+  for (const m of matches.slice(0, 100)) {
+    const isDir = !!m.is_dir;
+    const item = el('div', {
+      class: 'tree-node-row',
+      role: 'option',
+      tabindex: '0',
+      'aria-selected': 'false',
+      'data-path': m.path,
+      title: 'reveal ' + m.path + ' in the tree' + (isDir ? '' : ' and open it in the inspector'),
+    });
+    item.append(el('span', { class: 'tree-icon', 'aria-hidden': 'true', text: isDir ? 'dir' : 'file' }));
+    item.append(el('span', { class: 'tree-name mono', text: m.path }));
+    const br = badgeRowFromCounts(m.counts || {});
+    if (br.childNodes.length) item.append(br);
+    const activate = () => revealInTree(m.path, isDir);
+    item.addEventListener('click', activate);
+    item.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') activate(); });
+    box.append(item);
+  }
+}
+
+/* Expand the ancestor chain of path (loading every level on the way),
+   then focus the row. Files additionally open in the inspector. */
+async function revealInTree(path, isDir) {
+  hideSearchResults();
+  const segs = String(path).replace(/\\/g, '/').split('/').filter(Boolean);
+  let cur = '';
+  const chain = [];
+  for (const seg of segs) {
+    cur = cur ? cur + '/' + seg : seg;
+    chain.push(cur);
+  }
+  for (let i = 0; i < chain.length; i++) {
+    if (!isDir && i === chain.length - 1) break;   // file: expand ancestors only
+    const t = chain[i];
+    state.tree.expanded.add(t);
+    const entry = state.tree.cache.get(t);
+    if (!entry || (!entry.children && !entry.loading && !entry.error)) {
+      await loadDir(t);
+    }
+  }
+  state.tree.focusedPath = path;
+  renderTree();
+  focusTreeRowByPath(path);
+  if (!isDir) openInspector(path, null, { push: true });
+}
+
+function focusTreeRowByPath(path) {
+  const row = $('tree-body').querySelector('.tree-node-row[data-path="' + CSS.escape(path) + '"]');
+  if (row) {
+    setTreeFocus(row);
+    return;
+  }
+  if (state.tree.flat && state.tree.flatRows) {
+    const idx = state.tree.flatRows.findIndex((r) => r.child && r.child.path === path);
+    if (idx >= 0) {
+      const body = $('tree-body');
+      body.scrollTop = Math.max(0, idx * TREE_ROW_H - body.clientHeight / 2);
+      renderTreeWindow();
+      focusFlatIdx(idx);
+    }
   }
 }
 
@@ -994,7 +1593,42 @@ function metricValue(node) {
 
 function diskValue(node) {
   if (!node.is_dir) return Number(node.size) || 0;
+  const s = state.treemap.stats.get(node.path);
+  if (s && s.totalBytes != null) return s.totalBytes;   // exact, from stats
   return (node.children || []).reduce((sum, c) => sum + diskValue(c), 0);
+}
+
+/* Exact directory sizes come from /api/tree/stats. Only the new backend
+   has the endpoint (pagedApi flag), so the old server never sees the
+   request; until an answer arrives the cell keeps its partial-sum value
+   with a "…" placeholder. */
+async function fetchDirStats(path) {
+  const cache = state.treemap.stats;
+  if (cache.has(path)) return cache.get(path);
+  const inflight = state.treemap.statsPending.get(path);
+  if (inflight) return inflight;
+  const gen = state.treemap.statsGen;
+  const p = (async () => {
+    try {
+      const data = await api('/api/tree/stats', { path });
+      const s = {
+        totalBytes: data.total_bytes != null ? Number(data.total_bytes) : null,
+        totalFiles: data.total_files != null ? Number(data.total_files) : null,
+        problemBytes: data.problem_files_bytes != null ? Number(data.problem_files_bytes) : null,
+        buildBytes: data.build_bytes != null ? Number(data.build_bytes) : null,
+        share: data.share_of_root_percent != null ? Number(data.share_of_root_percent) : null,
+        complete: !!data.complete,
+      };
+      if (gen === state.treemap.statsGen) cache.set(path, s);
+      return s;
+    } catch {
+      return null;   // keep partial sums; the treemap never breaks on stats
+    } finally {
+      state.treemap.statsPending.delete(path);
+    }
+  })();
+  state.treemap.statsPending.set(path, p);
+  return p;
 }
 
 function humanSize(bytes) {
@@ -1081,6 +1715,7 @@ function renderTreemap() {
   const nodes = state.treemap.nodes.get(zoom);
   if (!nodes) {
     body.innerHTML = loadingHTML('Loading tree for treemap…');
+    renderTreemapLegend(0, 0);
     return;
   }
 
@@ -1097,15 +1732,59 @@ function renderTreemap() {
       ? 'Nothing to draw: no file sizes available for the fetched tree levels.'
       : 'Nothing to draw: no problems match the current severity filter (metric ' +
         state.treemap.metric + ').');
+    renderTreemapLegend(0, 0);
     return;
   }
   const max = Math.max(...items.map((it) => it.value));
+
+  // Disk metric: pull exact sizes for the visible top-level directories;
+  // the re-render after resolve swaps placeholders for real values.
+  if (state.treemap.metric === 'disk' && state.tree.pagedApi) {
+    const missing = nodes
+      .filter((n) => n.is_dir && !state.treemap.stats.has(n.path) && !state.treemap.statsPending.has(n.path))
+      .map((n) => n.path);
+    if (missing.length) {
+      const gen = state.treemap.statsGen;
+      Promise.all(missing.map(fetchDirStats)).then(() => {
+        if (gen !== state.treemap.statsGen) return;
+        if (state.tab === 'treemap' && state.treemap.metric === 'disk') renderTreemap();
+      });
+    }
+  }
+
   const root = el('div', { class: 'treemap-root', role: 'group', 'aria-label': 'Treemap of ' + (zoom || 'workspace root') });
   root.style.height = H + 'px';
   const rects = squarifyLayout(items, 0, 0, W, H);
   for (const r of rects) root.append(renderTreemapCell(r, max, 0));
   body.append(root);
   applyTreemapSelection(root);
+  renderTreemapLegend(total, max);
+}
+
+/* Human-readable scale legend under the treemap: a gradient from the
+   smallest to the largest cell color plus the largest value. */
+function renderTreemapLegend(total, max) {
+  const box = $('treemap-legend');
+  if (!box) return;
+  box.textContent = '';
+  if (!total) return;
+  const bar = el('span', { 'aria-hidden': 'true' });
+  bar.style.display = 'inline-block';
+  bar.style.width = '110px';
+  bar.style.height = '9px';
+  bar.style.verticalAlign = 'middle';
+  bar.style.margin = '0 6px';
+  bar.style.borderRadius = '2px';
+  bar.style.background = `linear-gradient(to right, ${cellBackground(0, max)}, ${cellBackground(max, max)})`;
+  box.append(el('span', { text: 'scale 0' }), bar,
+    el('span', { text: metricLabel(max) + ' (largest cell)' }));
+  if (state.treemap.metric === 'disk') {
+    box.append(el('span', {
+      text: '  ·  ' + (state.tree.pagedApi
+        ? 'dir sizes via /api/tree/stats; \u2248 marks partial data'
+        : 'dir sizes are partial sums over fetched levels; \u2248 marks partial data'),
+    }));
+  }
 }
 
 /* Re-apply the persisted selection after a re-render (zoom, metric or
@@ -1120,6 +1799,24 @@ function applyTreemapSelection(root) {
 function renderTreemapCell(r, max, depth) {
   const n = r.node;
   const isDir = !!n.is_dir;
+  const disk = state.treemap.metric === 'disk';
+
+  // Disk metric data quality: exact when /api/tree/stats answered with
+  // complete=true; "…" while the answer is in flight; partial (hatched,
+  // "≈") when only fetched-level sums are available.
+  let statsPending = false;
+  let dirPartial = false;
+  if (disk && isDir) {
+    const s = state.treemap.stats.get(n.path);
+    if (s && s.totalBytes != null) dirPartial = !s.complete;
+    else {
+      statsPending = state.tree.pagedApi && depth === 0;   // sub-cells are never fetched
+      dirPartial = true;
+    }
+    const entry = state.tree.cache.get(n.path);
+    if (entry && entry.nextCursor) dirPartial = true;      // listing pages still missing
+  }
+
   const cell = el('div', {
     class: 'tm-cell' + (isDir ? ' tm-zoomable' : ''),
     tabindex: '0',
@@ -1133,6 +1830,11 @@ function renderTreemapCell(r, max, depth) {
   cell.style.width = r.w + 'px';
   cell.style.height = r.h + 'px';
   cell.style.background = cellBackground(r.value, max);
+  if (dirPartial) {
+    // hatch overlay directly on the cell (not only in the tooltip)
+    cell.style.backgroundImage =
+      'repeating-linear-gradient(45deg, rgba(255,255,255,0.09) 0 5px, rgba(255,255,255,0) 5px 11px)';
+  }
 
   const dom = dominantSeverity(n.counts || {});
   if (r.w > 34 && r.h > 16) {
@@ -1145,6 +1847,37 @@ function renderTreemapCell(r, max, depth) {
       title: 'dominant severity: ' + dom,
       'aria-hidden': 'true',
     }));
+  }
+  if (disk && r.w > 46 && r.h > 18) {
+    const s = isDir ? state.treemap.stats.get(n.path) : null;
+    const sizeTxt = !isDir
+      ? humanSize(Number(n.size) || 0)
+      : (s && s.totalBytes != null
+        ? (s.complete ? '' : '\u2248 ') + humanSize(s.totalBytes)
+        : (statsPending ? '\u2026' : '\u2248 ' + humanSize(r.value)));
+    if (sizeTxt) {
+      const sp = el('span', { class: 'tm-size mono', 'aria-hidden': 'true', text: sizeTxt });
+      sp.style.position = 'absolute';
+      sp.style.right = '4px';
+      sp.style.bottom = '2px';
+      sp.style.fontSize = '10px';
+      sp.style.color = 'rgba(214,217,224,.8)';
+      cell.append(sp);
+    }
+  }
+  if (dirPartial && r.w > 30 && r.h > 14) {
+    const pm = el('span', {
+      class: 'tm-partial-mark mono',
+      'aria-hidden': 'true',
+      title: 'directory data is partial',
+      text: '\u2248',
+    });
+    pm.style.position = 'absolute';
+    pm.style.left = '3px';
+    pm.style.bottom = '2px';
+    pm.style.fontSize = '10px';
+    pm.style.color = 'rgba(214,217,224,.8)';
+    cell.append(pm);
   }
 
   // nested second level inside large directory cells
@@ -1286,8 +2019,24 @@ function tmTooltipText(n, value) {
     if (state.sev.has(s)) lines.push(`${s}: ${c[s] || 0}`);
   }
   if (state.treemap.metric === 'disk') {
-    lines.push(`disk: ${humanSize(value)}` + (n.is_dir ? ' (partial: fetched levels only)' : ''));
-    if (n.size != null) lines.push(`file size: ${humanSize(n.size)}`);
+    if (n.is_dir) {
+      const s = state.treemap.stats.get(n.path);
+      if (s && s.totalBytes != null) {
+        lines.push(`disk: ${humanSize(s.totalBytes)}` + (s.complete ? ' (exact)' : ' (partial)'));
+        if (s.totalFiles != null) lines.push(`files: ${s.totalFiles}`);
+        if (s.share != null) lines.push(`share of root: ${s.share.toFixed(1)}%`);
+        if (s.problemBytes > 0) lines.push(`problem files: ${humanSize(s.problemBytes)}`);
+        if (s.buildBytes > 0) {
+          const pct = s.totalBytes ? Math.round(100 * s.buildBytes / s.totalBytes) : 0;
+          lines.push(`build weight: ${humanSize(s.buildBytes)} (${pct}%)`);
+        }
+      } else {
+        lines.push(`disk: ${humanSize(value)} (partial: fetched levels only` +
+          (state.tree.pagedApi ? '; exact size loading…' : '') + ')');
+      }
+    } else {
+      lines.push(`disk: ${humanSize(value)}`);
+    }
   } else {
     lines.push(`${state.treemap.metric}: ${value}`);
   }
@@ -1839,7 +2588,15 @@ async function rescan() {
     // drop all caches, keep filters and UI state
     state.tree.cache.clear();
     state.tree.expanded.clear();
+    state.tree.flat = false;
+    state.tree.flatRows = null;
+    state.tree.focusIdx = null;
+    state.tree.searchResults = null;
+    hideSearchResults();
+    updateTreeCount(0, 0);
     state.treemap.nodes.clear();
+    state.treemap.stats.clear();
+    state.treemap.statsGen++;   // in-flight stats responses drop themselves
     state.treemap.zoom = '';
     state.treemap.selected = null;
     state.simulate.result = null;
@@ -1880,6 +2637,10 @@ function globalKeydown(ev) {
   if (ev.altKey && ev.key === 'ArrowRight') { ev.preventDefault(); historyGo(1); return; }
   if (ev.key === 'Escape') {
     if (!$('card-overlay').hidden) { closeFindingCard(); return; }
+    if (state.tab === 'tree' && !$('tree-search-results').hidden) {
+      hideSearchResults();
+      return;
+    }
     if (state.tab === 'treemap' && !$('treemap-tooltip').hidden) {
       $('treemap-tooltip').hidden = true;
       return;
@@ -1899,10 +2660,8 @@ function bindUI() {
   $('btn-back').addEventListener('click', () => historyGo(-1));
   $('btn-fwd').addEventListener('click', () => historyGo(1));
 
-  $('tree-search').addEventListener('input', (ev) => {
-    state.tree.filter = ev.target.value.trim();
-    renderTree();
-  });
+  $('tree-search').addEventListener('input', onTreeSearchInput);
+  $('tree-search-scope').addEventListener('change', onTreeSearchInput);
   $('tree-sort').addEventListener('change', (ev) => {
     state.tree.sort = ev.target.value;
     renderTree();
@@ -1920,6 +2679,7 @@ function bindUI() {
     renderTree();
   });
   $('tree-body').addEventListener('keydown', treeKeydown);
+  $('tree-body').addEventListener('scroll', onTreeScroll, { passive: true });
 
   $('fnd-gate').addEventListener('change', (ev) => {
     state.findings.gate = ev.target.value;
@@ -1961,10 +2721,16 @@ function bindUI() {
   $('ins-harness').addEventListener('change', () => renderInstructionsDiagram());
 
   let resizeTimer = null;
+  let treeResizeTimer = null;
   window.addEventListener('resize', () => {
-    if (state.tab !== 'treemap' || !state.treemap.nodes.size) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(renderTreemap, 150);
+    if (state.tab === 'treemap' && state.treemap.nodes.size) {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(renderTreemap, 150);
+    }
+    if (state.tab === 'tree' && state.tree.flat) {
+      clearTimeout(treeResizeTimer);
+      treeResizeTimer = setTimeout(renderTreeWindow, 100);
+    }
   });
 
   document.addEventListener('keydown', globalKeydown);
@@ -1977,13 +2743,36 @@ function setTreemapMetric(m) {
   $('metric-disk').setAttribute('aria-pressed', String(m === 'disk'));
   $('metric-formula').textContent =
     m === 'risk' ? 'Risk = 5\u00b7crit + 4\u00b7high + 3\u00b7med + 2\u00b7low + 1\u00b7info (sum over subtree)'
-    : m === 'disk' ? 'Disk = file sizes from /api/tree; dir sizes are partial sums over fetched levels (severity filter does not apply)'
+    : m === 'disk' ? 'Disk = file sizes from /api/tree + directory totals from /api/tree/stats (\u2026 loading, \u2248 partial); severity filter does not apply'
     : 'Density = count of findings in subtree';
   if (state.treemap.nodes.size) renderTreemap();
 }
 
+/* Inline styles for the V3 aux containers (search results dropdown,
+   treemap scale legend) — kept out of style.css on purpose. */
+function styleAuxBoxes() {
+  const srb = $('tree-search-results');
+  if (srb) {
+    srb.style.maxHeight = '240px';
+    srb.style.overflowY = 'auto';
+    srb.style.padding = '2px 10px 6px';
+    srb.style.borderBottom = '1px solid var(--border)';
+    srb.style.background = 'rgba(20,22,27,.6)';
+  }
+  const lg = $('treemap-legend');
+  if (lg) {
+    lg.style.padding = '2px 10px';
+    lg.style.fontSize = '11px';
+    lg.style.color = 'var(--text-muted)';
+    lg.style.whiteSpace = 'nowrap';
+    lg.style.overflow = 'hidden';
+    lg.style.textOverflow = 'ellipsis';
+  }
+}
+
 function boot() {
   bindUI();
+  styleAuxBoxes();
   updateHistoryButtons();
   switchTab('overview');
 }

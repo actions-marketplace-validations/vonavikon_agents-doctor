@@ -59,17 +59,26 @@
   <section class="panel tab-panel" id="panel-tree" role="tabpanel" aria-labelledby="tab-tree" hidden>
     <div class="panel-header">
       <div class="toolbar">
-        <input type="search" id="tree-search" class="input" placeholder="Filter visible nodes by name…" aria-label="Filter visible tree nodes by name">
+        <input type="search" id="tree-search" class="input" placeholder="Search by name…" aria-label="Search the tree by name; scope selects loaded tree or whole workspace">
+        <label class="inline-label">In
+          <select id="tree-search-scope" class="input select" aria-label="Search scope">
+            <option value="loaded">loaded tree</option>
+            <option value="workspace">whole workspace</option>
+          </select>
+        </label>
         <label class="inline-label">Sort
           <select id="tree-sort" class="input select" aria-label="Sort tree nodes">
             <option value="name">name</option>
+            <option value="size">size</option>
             <option value="problems">problems</option>
           </select>
         </label>
         <button id="tree-expand-all" class="icon-btn" title="Expand all loaded directories">Expand loaded</button>
         <button id="tree-collapse-all" class="icon-btn" title="Collapse all">Collapse all</button>
+        <span class="formula mono grow" id="tree-count" role="status" aria-live="polite"></span>
       </div>
     </div>
+    <div id="tree-search-results" hidden></div>
     <div class="panel-body" id="tree-body" tabindex="0" role="tree" aria-label="Workspace tree">
       <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading tree…</div>
     </div>
@@ -92,6 +101,7 @@
     <div class="panel-body" id="treemap-body" tabindex="-1">
       <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading tree for treemap…</div>
     </div>
+    <div class="treemap-legend formula mono" id="treemap-legend" aria-hidden="true"></div>
     <div class="treemap-tooltip mono" id="treemap-tooltip" role="status" hidden></div>
   </section>
 
