@@ -88,20 +88,59 @@ def get_key(create=True):
 
 
 def _create_key(path):
-    data = secrets.token_bytes(KEY_BYTES)
     try:
         path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return get_key()  # another process created it first: load theirs
     except OSError as exc:
         raise FingerprintKeyError(
             'cannot create the fingerprint key file %s: %s' % (path, exc)) from None
-    try:
-        os.write(fd, data)
-    finally:
-        os.close(fd)
-    return data
+    # verified creation: some filesystem filter drivers duplicate the
+    # final byte at fsync/close, and the mangling is deterministic in
+    # that byte's value (reproduced on Windows: ~11% of random keys
+    # corrupt on EVERY write, the rest never). Two consequences:
+    # - the check must re-open the path after close: the writing fd
+    #   still sees the clean page cache;
+    # - each retry draws FRESH random bytes: retrying the same data
+    #   would fail every time.
+    last_exc = None
+    for _attempt in range(4):
+        data = secrets.token_bytes(KEY_BYTES)
+        try:
+            fd = os.open(str(path),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return get_key()  # another process created it first
+        except OSError as exc:
+            last_exc = exc
+            continue
+        try:
+            written = 0
+            while written < len(data):
+                written += os.write(fd, data[written:])
+            os.fsync(fd)
+            data_written = True
+        except OSError as exc:
+            last_exc = exc
+            data_written = False
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if data_written:
+            try:
+                landed = path.read_bytes()
+            except OSError as exc:
+                last_exc = exc
+                landed = None
+            if landed == data:
+                return data
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    raise FingerprintKeyError(
+        'cannot create the fingerprint key file %s: verification failed '
+        '(%s)' % (path, last_exc or 'write does not match'))
 
 
 def fingerprint(value):

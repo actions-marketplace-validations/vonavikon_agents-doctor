@@ -187,9 +187,16 @@ class Containment(RemediateCase):
             remediate.plan(rep, 'HLTH-009')
         step = {'action': 'trash_move', 'target': str(outside),
                 'command': 'move', 'reversible': True, 'note': ''}
-        with self.assertRaises(ValueError):
-            with redirect_stdout(StringIO()):
-                remediate.apply_plan([step], str(self.ws), assume_yes=True)
+        # since the hardening phase a pre-flight escape is recorded as
+        # a refused step (same shape as an in-flight refusal), not
+        # raised: the caller reads failed[0]['error'] instead of
+        # catching ValueError
+        with redirect_stdout(StringIO()):
+            report = remediate.apply_plan([step], str(self.ws),
+                                          assume_yes=True)
+        self.assertEqual(report['executed'], [])
+        self.assertEqual(len(report['failed']), 1)
+        self.assertIn('SecurityRefusal', report['failed'][0]['error'])
         self.assertTrue(outside.exists())            # nothing moved
         self.assertFalse((self.ws / remediate.TRASH_DIR_NAME).exists())
 

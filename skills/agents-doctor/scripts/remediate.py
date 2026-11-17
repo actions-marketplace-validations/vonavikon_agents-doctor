@@ -570,8 +570,26 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
     if not steps:
         print('nothing to do: the plan is empty')
         return report
+    # pre-flight containment: a step whose target escapes the root
+    # (e.g. swapped for an outside symlink between plan and apply) is
+    # recorded as a refused step, not raised -- the caller gets the
+    # same {executed: [], failed: [SecurityRefusal...]} report as an
+    # in-flight refusal
+    refused = []
     for st in steps:
-        _require_inside(root, st.get('target', ''))
+        try:
+            _require_inside(root, st.get('target', ''))
+        except trashops.SecurityRefusal as exc:
+            refused.append((st, exc))
+    if refused:
+        for st, exc in refused:
+            report['failed'].append({
+                'action': st.get('action'), 'target': st.get('target'),
+                'error': 'SecurityRefusal: %s' % exc})
+        print('refused: %d step(s) fail the containment check '
+              '(target escaped the workspace root); nothing executed'
+              % len(refused))
+        return report
     print('plan to apply:')
     for i, st in enumerate(steps, 1):
         print('  %d. [%s] %s' % (i, st.get('action'), st.get('command')))
