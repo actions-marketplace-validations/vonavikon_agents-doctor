@@ -4,6 +4,54 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [1.0.0] - 2026-11-17
+
+Production release: renamed to agents-doctor, all P0 hardening complete.
+
+### Breaking changes
+
+- Renamed from workspace-audit to agents-doctor (plugin, skill, command,
+  CLI entry point, GitHub repo). Install command is now
+  `/plugin marketplace add vonavikon/agents-doctor`.
+- FOCUS_SPECS canonical mapping: security=G6,G7; structure=G1,G4,G9;
+  agents=G2,G3,G5,G8. Findings filtered by gate ID, not category.
+
+### Security (P0)
+
+- TOCTOU hardening: _pre_operation_check() re-verifies canonical path,
+  containment, symlink chain, type, size/mtime before every mutating
+  operation (after user confirmation). 8 attack scenarios tested.
+- Unified rollback: manifest v2 with rmdir restore (recreates empty dir),
+  create_file undo (sha256 match required), create_directory undo.
+  Idempotent, detects incomplete operations.
+- Remote URL sanitization: git remote credentials never reach artifacts.
+- HMAC-SHA256 fingerprints (128-bit) with per-installation key.
+- Secret detection: unified rule table (py + POSIX ERE), 12 rule classes,
+  ${} template placeholders excluded.
+- Git history: bounded scan with --history-depth, --history-all-refs;
+  incomplete scan = unknown, never pass.
+
+### Product
+
+- CLI: audit --baseline (diff section), sarif subcommand, focus modes,
+  compare, explain, fix (dry-run + --apply)
+- Content quality engine: signal-to-noise, generic phrases, contradictions,
+  instruction density, redundancy, specificity — integrated into G3 and
+  human report (EN/RU)
+- Privacy model: fully local by default; LLM context documented honestly
+- Safe cleanup: preview, typed YES, trash with manifest, restore command
+- Human-readable reports EN/RU with token cost estimates
+- SARIF 2.1.0 export for CI integrations
+- Logo: pixel-art D + medical cross (Sega style)
+
+### QA
+
+- 485+ tests across unit, integration, security regression, QA eval,
+  LLM offline grading, focus engine, TOCTOU attacks, rollback
+- CI: Linux, Windows, macOS, Python 3.10 and 3.12
+- Per-module coverage floors enforced in CI
+- Release ZIP built from explicit allowlist, verified against it
+
 ## [0.7.0] - 2026-11-16
 
 ### Security
