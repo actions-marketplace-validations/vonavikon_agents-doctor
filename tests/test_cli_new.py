@@ -94,5 +94,99 @@ class BaselineAuditTest(unittest.TestCase):
         self.assertIsNone(agents_doctor._load_baseline(str(f)))
 
 
+class SimulateSubcommandTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.base,
+                                                            ignore_errors=True))
+        # isolated home: the default --home would read this machine's
+        # real global instruction files and make the test nondeterministic
+        self.home = self.base / 'home'
+        self.home.mkdir()
+        self.ws = self.base / 'ws'
+        self.ws.mkdir()
+        (self.ws / 'AGENTS.md').write_text('# x\nAlways run tests\n',
+                                           encoding='utf-8')
+
+    def test_simulate_root(self):
+        rc = agents_doctor.main(['simulate', str(self.ws),
+                                 '--home', str(self.home)])
+        self.assertEqual(rc, 0)
+
+    def test_simulate_target_inside(self):
+        sub = self.ws / 'src'
+        sub.mkdir()
+        rc = agents_doctor.main(['simulate', str(self.ws),
+                                 '--home', str(self.home),
+                                 '--target', 'src'])
+        self.assertEqual(rc, 0)
+
+    def test_simulate_target_outside_refused(self):
+        rc = agents_doctor.main(['simulate', str(self.ws),
+                                 '--home', str(self.home),
+                                 '--target', '../elsewhere'])
+        self.assertEqual(rc, 1)
+
+    def test_simulate_not_a_directory(self):
+        rc = agents_doctor.main(['simulate', str(self.base / 'nope')])
+        self.assertEqual(rc, 1)
+
+
+class UiSubcommandTest(unittest.TestCase):
+    def test_passthrough_to_server(self):
+        import ui.server as srv
+        calls = {}
+        argv_saved = []
+
+        def fake_main(argv):
+            argv_saved.extend(argv)
+            return 0
+
+        orig = srv.main
+        srv.main = fake_main
+        try:
+            rc = agents_doctor.main(['ui', 'some-root', '--port', '8123',
+                                     '--no-open', '--baseline', 'old.json'])
+        finally:
+            srv.main = orig
+        self.assertEqual(rc, 0)
+        self.assertIn('--port', argv_saved)
+        self.assertIn('8123', argv_saved)
+        self.assertIn('--baseline', argv_saved)
+        self.assertIn('--no-open', argv_saved)
+
+
+class RuntimeFlagTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.base,
+                                                            ignore_errors=True))
+        self.ws = self.base / 'ws'
+        self.ws.mkdir()
+        (self.ws / 'AGENTS.md').write_text('x\n', encoding='utf-8')
+
+    def test_runtime_section_lands_in_report(self):
+        out = self.base / 'scan.json'
+        rc = agents_doctor.main(['audit', str(self.ws),
+                                 '--out', str(out), '--runtime'])
+        self.assertEqual(rc, 0)
+        data = json.loads(out.read_text(encoding='utf-8'))
+        self.assertIn('runtime', data)
+        self.assertIn('checks', data['runtime'])
+        self.assertTrue(any(c['id'] == 'RT-PY' for c in data['runtime']['checks']))
+
+    def test_runtime_failure_is_warning_not_error(self):
+        out = self.base / 'scan.json'
+        import runtime_health
+        with mock.patch.object(runtime_health,
+                               'check_environment',
+                               side_effect=RuntimeError('boom')):
+            rc = agents_doctor.main(['audit', str(self.ws),
+                                     '--out', str(out), '--runtime'])
+        self.assertEqual(rc, 0)
+        data = json.loads(out.read_text(encoding='utf-8'))
+        self.assertNotIn('runtime', data)
+
+
 if __name__ == '__main__':
     unittest.main()
