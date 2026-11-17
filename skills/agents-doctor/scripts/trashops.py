@@ -40,6 +40,15 @@ inside the run directory. The rules implemented here:
 - TOCTOU snapshots: planning code records {size, mtime_ns, type} per
   item via snapshot(); the executor re-stats immediately before each
   operation and aborts the item when unchanged() says the file changed.
+- P0.1 pre-operation gate: every mutating operation calls
+  _pre_operation_check(root, target, snapshot) immediately before the
+  filesystem change (after the user confirmed): canonical containment
+  under root, no symlink anywhere in the literal path chain from root
+  to target, expected type and snapshot size/mtime must all hold. A
+  refusal raises SecurityRefusal (or skips the item -- the caller's
+  choice) and the disk is left alone. Created files are made with
+  os.open(O_CREAT|O_EXCL), so a name planted in the gap can neither be
+  written through nor overwritten.
 - Restore: restore(run_dir, root) undoes every restorable entry of one
   run: 'moved' items move back (with a '.restored-N' suffix when the
   original location is occupied), removed empty directories are
@@ -96,6 +105,13 @@ RESTORABLE = ('moved', 'removed', 'created', 'restore_failed', 'restoring')
 DONE_STATUSES = ('moved', 'removed', 'created')
 
 
+class SecurityRefusal(Exception):
+    """A _pre_operation_check refused the mutation (P0.1 TOCTOU
+    defence): the target failed the containment, symlink-chain or
+    snapshot verification run immediately before the filesystem
+    change. Nothing was touched."""
+
+
 def new_opid():
     """Short operation id: first 8 hex chars of a uuid4."""
     return uuid.uuid4().hex[:8]
@@ -141,6 +157,92 @@ def unchanged(snap, cur):
     return (snap.get('size') == cur.get('size')
             and snap.get('mtime_ns') == cur.get('mtime_ns')
             and snap.get('type') == cur.get('type'))
+
+
+def _pre_operation_check(root, target_path, snapshot=None,
+                         expected_type=None, allow_missing=False):
+    """Last-chance TOCTOU gate for every mutating operation (P0.1).
+
+    Runs immediately before the filesystem change and after the user
+    confirmed. Verifies, in order:
+
+    - no symlink sits anywhere in the literal path chain between the
+      resolved root and the target: a parent directory swapped for a
+      link, or the target itself replaced by one, is refused however
+      innocent its destination looks (resolve() alone would accept a
+      link whose destination is still inside the root);
+    - the resolved target is strictly under the resolved root;
+    - the target exists and its on-disk type matches the expected one
+      (taken from the snapshot, or from expected_type);
+    - size and mtime_ns still match the plan-time snapshot.
+
+    Returns (ok, reason): reason is None on success and a short word on
+    refusal -- 'symlink', 'escape', 'missing', 'changed' or
+    'unreadable'. allow_missing=True (create-style operations: the
+    target is about to be created) skips the existence, type and
+    snapshot checks but keeps the symlink walk and containment, so a
+    symlink planted anywhere on the chain below root still refuses.
+    """
+    try:
+        root_canon = Path(root).resolve()
+    except OSError:
+        return False, 'unreadable'
+    target = Path(target_path)
+    # literal chain below the root: every component is lstat-checked;
+    # components above the root are the user's own spelling of the root
+    # and are not judged here
+    try:
+        rel_parts = target.relative_to(root_canon).parts
+    except ValueError:
+        rel_parts = None
+    if rel_parts is not None:
+        node = root_canon
+        for part in rel_parts:
+            node = node / part
+            if os.path.islink(str(node)):
+                return False, 'symlink'
+    else:
+        # target not spelled below the resolved root (8.3 aliases and
+        # friends): walk the literal ancestors until one resolves to
+        # the root; anything symlinked on the way is a refusal
+        for anc in target.parents:
+            try:
+                if anc.resolve() == root_canon:
+                    break
+            except OSError:
+                pass
+            if os.path.islink(str(anc)):
+                return False, 'symlink'
+        if os.path.islink(str(target)):
+            return False, 'symlink'
+    if os.path.islink(str(target)):
+        return False, 'symlink'
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return False, 'unreadable'
+    if root_canon not in resolved.parents:
+        return False, 'escape'
+    try:
+        st = os.stat(str(target))
+    except OSError:
+        if allow_missing:
+            return True, None
+        return False, 'missing'
+    if stat_mod.S_ISDIR(st.st_mode):
+        kind = 'dir'
+    elif stat_mod.S_ISREG(st.st_mode):
+        kind = 'file'
+    else:
+        kind = 'other'
+    expected = (snapshot or {}).get('type') or expected_type
+    if expected and kind != expected:
+        return False, 'changed'
+    if snapshot is not None:
+        cur = {'size': st.st_size, 'mtime_ns': st.st_mtime_ns, 'type': kind}
+        if not unchanged(snapshot, cur):
+            return False, 'changed'
+    return True, None
 
 
 def _exists(p):
@@ -229,7 +331,19 @@ class TrashRun:
                        'removed_dirs': 0, 'created': 0, 'freed_bytes': 0},
         }
         self.entries = []
+        # P0.1: the trash chain must be real directories, not symlinks
+        # planted between confirmation and the first move -- a linked
+        # trash folder would route the whole run (manifest included)
+        # outside the workspace root
+        trash_parent = self.root / TRASH_DIR_NAME
+        if os.path.islink(str(trash_parent)):
+            raise SecurityRefusal(
+                'the trash folder is a symlink; a run cannot be routed '
+                'through it: %s' % trash_parent)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        if os.path.islink(str(self.run_dir)):
+            raise SecurityRefusal(
+                'the trash run directory is a symlink: %s' % self.run_dir)
         self.save()
 
     def save(self):
@@ -260,10 +374,31 @@ def move_to_trash(run, src, rel, size, mtime_ns, kind=None):
     style: the manifest entry goes to disk with status 'moving' before
     shutil.move runs, then becomes 'moved' or 'failed'. The destination
     is collision-suffixed, never overwritten. Returns (dst, entry_idx).
-    Raises whatever the move raised after marking the entry 'failed'."""
+    Raises whatever the move raised after marking the entry 'failed'.
+
+    P0.1: the destination side is gated right before the move -- the
+    run directory and every component below it up to the destination
+    parent must be real directories under root. A trash chain swapped
+    for symlinks after the user confirmed raises SecurityRefusal before
+    anything is written."""
     rel = os.path.normpath(str(rel))
+    ok, reason = _pre_operation_check(run.root, run.run_dir,
+                                      expected_type='dir')
+    if not ok:
+        raise SecurityRefusal('trash run directory refused (%s): %s'
+                              % (reason, run.run_dir))
     dst = collision_free_dst(run.run_dir / rel)
+    ok, reason = _pre_operation_check(run.root, dst.parent,
+                                      allow_missing=True)
+    if not ok:
+        raise SecurityRefusal('trash destination refused (%s): %s'
+                              % (reason, dst.parent))
     dst.parent.mkdir(parents=True, exist_ok=True)
+    if _exists(dst):
+        # the name was free a moment ago: something raced us, and
+        # shutil.move onto an existing path can overwrite on POSIX
+        raise SecurityRefusal('trash destination appeared before the '
+                              'move: %s' % dst)
     idx = run.add_entry({
         'opid': run.opid,
         'action': ACTION_TRASH_MOVE,
@@ -324,7 +459,12 @@ def record_create_file(run, target, rel, data):
     deletes the file again, but only while its hash still matches -- a
     file modified after the run is kept and reported as skipped. data
     may be str (written as UTF-8) or bytes. Returns the entry index;
-    raises whatever the write raised after marking the entry 'failed'."""
+    raises whatever the write raised after marking the entry 'failed'.
+
+    P0.1: the file is created with os.open(O_CREAT|O_EXCL) -- a name
+    that appears between the caller's check and this write (or a
+    symlink planted there) makes the open fail; an existing file is
+    never opened, written through or overwritten."""
     if isinstance(data, str):
         data = data.encode('utf-8')
     target = Path(target)
@@ -343,7 +483,14 @@ def record_create_file(run, target, rel, data):
         'restorable': True,
     })
     try:
-        target.write_bytes(data)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, 'O_BINARY'):
+            flags |= os.O_BINARY
+        fd = os.open(str(target), flags, 0o644)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
     except Exception as exc:
         run.update_entry(idx, status='failed',
                          error='%s: %s' % (type(exc).__name__, exc))
@@ -463,6 +610,21 @@ def _undo_entry(run_dir, root, entry):
         if not _is_under(src, run_dir) or not _exists(src):
             raise ValueError('trash copy missing or outside the run dir: %s'
                              % trash_rel)
+        # manifest integrity (P0.1): a file entry must still carry the
+        # size recorded when it was moved; a mismatch means the manifest
+        # (or the copy) was tampered with. A recorded size of 0 counts
+        # as 'not recorded' -- legacy and hand-built entries.
+        if entry.get('type') == 'file':
+            recorded = entry.get('size')
+            try:
+                actual = os.stat(str(src)).st_size
+            except OSError:
+                actual = None
+            if (actual is not None and isinstance(recorded, int)
+                    and recorded > 0 and actual != recorded):
+                raise ValueError(
+                    'trash copy size %d does not match the manifest record '
+                    '%d: %s' % (actual, recorded, trash_rel))
         dst = _undo_target(root, orig)
         if _exists(dst):
             for n in range(1, 1000):
@@ -472,6 +634,18 @@ def _undo_entry(run_dir, root, entry):
                     break
             else:
                 raise OSError('no free restore destination for %s' % dst)
+        # P0.1 gate on the restore destination: reachable through a
+        # real directory chain under root only -- a symlink planted at
+        # the original spot or anywhere above it refuses the undo
+        ok, reason = _pre_operation_check(root, dst, allow_missing=True)
+        if not ok:
+            raise ValueError('restore destination refused (%s): %s'
+                             % (reason, dst))
+        if _exists(dst):
+            # the name was free during the collision check: something
+            # raced us; never move onto an appeared path
+            raise ValueError('restore destination appeared after the '
+                             'collision check: %s' % dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
         return 'restored', dst
