@@ -33,17 +33,16 @@ PROG = 'agents_doctor'
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-# focus name -> gates and finding categories kept in the report; every
-# other gate (rep['gates']) and finding (rep['findings_detailed']) is
-# dropped before the JSON is written. Raw fact sections (secrets, junk,
-# top_level, ...) stay complete either way.
+# focus name -> gate ids kept in the report (commands/agents-doctor.md
+# is canonical); every other gate (rep['gates']) and finding
+# (rep['findings_detailed']) is dropped before the JSON is written.
+# Findings are filtered by their 'gate' field only: category lists used
+# to ride along here and drifted from the gate mapping. Raw fact
+# sections (secrets, junk, top_level, ...) stay complete either way.
 FOCUS_SPECS = {
-    'security': {'gates': ('G6', 'G7'),
-                 'categories': ('secrets', 'git')},
-    'structure': {'gates': ('G1', 'G2', 'G4'),
-                  'categories': ('dirs', 'config')},
-    'agents': {'gates': ('G3', 'G5', 'G8'),
-               'categories': ('rules', 'skills', 'governance')},
+    'security': {'gates': ['G6', 'G7']},
+    'structure': {'gates': ['G1', 'G4', 'G9']},
+    'agents': {'gates': ['G2', 'G3', 'G5', 'G8']},
 }
 
 
@@ -61,12 +60,16 @@ def _load_json(path):
 
 
 def apply_focus(rep, focus):
-    """Drop the gates and findings outside the focus, in place."""
+    """Drop the gates and findings outside the focus, in place.
+
+    Gates are kept by 'gid', findings by their 'gate' field; the gate
+    list is the single source of truth, no category filtering.
+    """
     spec = FOCUS_SPECS[focus]
     rep['gates'] = [g for g in rep.get('gates') or []
                     if g.get('gid') in spec['gates']]
     rep['findings_detailed'] = [f for f in rep.get('findings_detailed') or []
-                                if f.get('category') in spec['categories']]
+                                if f.get('gate') in spec['gates']]
     rep['focus'] = focus
     return rep
 
@@ -227,9 +230,8 @@ def build_parser():
     pa.add_argument('--deep', action='store_true',
                     help='also scan git history for secrets (slower)')
     pa.add_argument('--focus', choices=sorted(FOCUS_SPECS), default=None,
-                    help='keep only part of the report: security=G6,G7 + '
-                         'secrets,git; structure=G1,G2,G4 + dirs,config; '
-                         'agents=G3,G5,G8 + rules,skills,governance')
+                    help='keep only part of the report: security=G6,G7; '
+                         'structure=G1,G4,G9; agents=G2,G3,G5,G8')
     pa.add_argument('--out', default='scan.json',
                     help='where to write the JSON report (default: scan.json)')
     pa.add_argument('--report', default=None, metavar='AUDIT.md',

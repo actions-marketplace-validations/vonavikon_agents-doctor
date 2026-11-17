@@ -9,37 +9,55 @@ inside the run directory. The rules implemented here:
 - Operation id: every execute() run gets a short random opid (8 hex
   chars); the run directory is <YYYYmmdd-HHMMSS>-<opid>, so two runs in
   the same second can never share a directory.
-- Write-ahead manifest: the entry for an item is written with status
-  'moving' BEFORE the move starts and updated to 'moved' or 'failed'
-  after. A crash mid-run leaves the in-flight entry visible in the
-  manifest, which is exactly what crash recovery looks for.
-- Manifest header: {opid, root, started_at, tool, interrupted_run,
-  totals}; entries add {action, original_path, trash_path, size,
-  mtime_ns, moved_at, status, error?, restorable}.
+- Write-ahead manifest: the entry for an item is written with an
+  in-flight status ('moving', 'removing', 'creating') BEFORE the
+  operation starts and updated to its final status ('moved', 'removed',
+  'created', 'failed') after. A crash mid-run leaves the in-flight
+  entry visible in the manifest, which is exactly what crash recovery
+  looks for.
+- Manifest header: {opid, manifest_schema_version, root, started_at,
+  tool, interrupted_run, totals}; entries add {action, original_path,
+  trash_path, size, mtime_ns, sha256?, moved_at, status, error?,
+  restorable}. manifest_schema_version '2' (what this code writes)
+  journals every operation type below; version '1' -- manifests from
+  before the field existed -- covers trash moves and non-restorable
+  rmdirs only.
+- Entry actions (schema 2): trash_move (restore moves the item back),
+  rmdir (restore recreates the empty directory), create_file (restore
+  deletes the file again while its sha256 still matches) and
+  create_directory (restore removes the directory again while it is
+  still empty). Schema 1 wrote 'trash' for trash_move and recorded
+  rmdirs with restorable: false; both old spellings stay readable.
 - Crash recovery: before a new run starts, earlier run directories are
-  scanned; a manifest holding any in-flight entry ('moving'/'removing')
-  marks that run as interrupted. Nothing in it is deleted or resumed
-  blindly -- its opid is recorded in the new manifest header as
-  'interrupted_run' and the new run continues.
+  scanned; a manifest holding any in-flight entry
+  ('moving'/'removing'/'creating') marks that run as interrupted.
+  Nothing in it is deleted or resumed blindly -- its opid is recorded
+  in the new manifest header as 'interrupted_run' and the new run
+  continues.
 - Destination collisions never overwrite: an existing trash destination
   gets '.__N__' (N=1..999) appended to the basename until a free name is
   found. The manifest records the suffixed path.
 - TOCTOU snapshots: planning code records {size, mtime_ns, type} per
   item via snapshot(); the executor re-stats immediately before each
   operation and aborts the item when unchanged() says the file changed.
-- Restore: restore(run_dir, root) moves 'moved' entries back, with a
-  '.restored-N' suffix when the original location is occupied, and
-  updates the manifest. Removed empty folders are recorded with
-  restorable: false and are skipped by restore.
+- Restore: restore(run_dir, root) undoes every restorable entry of one
+  run: 'moved' items move back (with a '.restored-N' suffix when the
+  original location is occupied), removed empty directories are
+  recreated, created files are deleted again while their sha256 still
+  matches and created directories are removed again while still empty.
+  Entries whose disk state moved on are skipped with a warning instead
+  of destroyed; already-restored entries are a no-op.
 
 Every mutating helper re-checks containment (resolved paths must stay
 under root / the run directory) right before it acts. Python 3.9+,
 stdlib only.
 """
+import hashlib
 import json
 import os
 import shutil
 import stat as stat_mod
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -48,13 +66,34 @@ from pathlib import Path
 TRASH_DIR_NAME = '.agents-doctor-trash'
 MANIFEST_NAME = 'manifest.json'
 
+# manifest schema versions: '1' is every manifest written before the
+# manifest_schema_version field existed (trash moves plus rmdirs that
+# were not restorable), '2' journals all four operation types and is
+# the only version this code writes
+SCHEMA_V1 = '1'
+SCHEMA_V2 = '2'
+MANIFEST_SCHEMA_VERSION = SCHEMA_V2
+
+# entry actions (schema 2 vocabulary)
+ACTION_TRASH_MOVE = 'trash_move'
+ACTION_RMDIR = 'rmdir'
+ACTION_CREATE_FILE = 'create_file'
+ACTION_CREATE_DIRECTORY = 'create_directory'
+ACTIONS = (ACTION_TRASH_MOVE, ACTION_RMDIR, ACTION_CREATE_FILE,
+           ACTION_CREATE_DIRECTORY)
+
 # entry statuses that mean "an operation was in flight when the process
 # died" -- the signal crash recovery looks for
-IN_FLIGHT = ('moving', 'removing')
+IN_FLIGHT = ('moving', 'removing', 'creating')
 
-# statuses restore() will pick up again (a restore that failed once can
-# be retried while the trash copy still exists)
-RESTORABLE = ('moved', 'restore_failed')
+# statuses restore() will pick up (plus 'restoring', left behind by a
+# restore that crashed mid-undo; a restore that failed once can be
+# retried while there is still something to undo)
+RESTORABLE = ('moved', 'removed', 'created', 'restore_failed', 'restoring')
+
+# statuses a completed-but-not-restored entry can carry; used to count
+# the entries the restorable flag keeps out of the undo set
+DONE_STATUSES = ('moved', 'removed', 'created')
 
 
 def new_opid():
@@ -181,12 +220,13 @@ class TrashRun:
         self.manifest_path = self.run_dir / MANIFEST_NAME
         self.header = {
             'opid': self.opid,
+            'manifest_schema_version': MANIFEST_SCHEMA_VERSION,
             'root': str(self.root),
             'started_at': _iso_now(),
             'tool': str(tool),
             'interrupted_run': interrupted,
             'totals': {'planned': 0, 'moved': 0, 'failed': 0, 'skipped': 0,
-                       'removed_dirs': 0, 'freed_bytes': 0},
+                       'removed_dirs': 0, 'created': 0, 'freed_bytes': 0},
         }
         self.entries = []
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -226,7 +266,7 @@ def move_to_trash(run, src, rel, size, mtime_ns, kind=None):
     dst.parent.mkdir(parents=True, exist_ok=True)
     idx = run.add_entry({
         'opid': run.opid,
-        'action': 'trash',
+        'action': ACTION_TRASH_MOVE,
         'original_path': rel,
         'trash_path': dst.relative_to(run.run_dir).as_posix(),
         'size': size or 0,
@@ -248,19 +288,24 @@ def move_to_trash(run, src, rel, size, mtime_ns, kind=None):
 
 def record_rmdir(run, target, rel, snap):
     """rmdir one confirmed-empty directory, write-ahead style: entry
-    status 'removing' before os.rmdir, 'removed' after. Empty folders
-    are not restorable; the manifest says so."""
+    status 'removing' before os.rmdir, 'removed' after. The entry is
+    restorable: restore() recreates the (empty) directory with
+    os.makedirs, so an empty folder costs nothing to get back. The
+    manifest also records parent_exists, whether the directory's parent
+    existed at removal time."""
+    target = Path(target)
     idx = run.add_entry({
         'opid': run.opid,
-        'action': 'rmdir',
+        'action': ACTION_RMDIR,
         'original_path': os.path.normpath(str(rel)),
         'trash_path': None,
         'size': (snap or {}).get('size') or 0,
         'mtime_ns': (snap or {}).get('mtime_ns'),
         'type': (snap or {}).get('type'),
+        'parent_exists': _exists(target.parent),
         'moved_at': _iso_now(),
         'status': 'removing',
-        'restorable': False,
+        'restorable': True,
     })
     try:
         os.rmdir(str(target))
@@ -272,12 +317,76 @@ def record_rmdir(run, target, rel, snap):
     return idx
 
 
+def record_create_file(run, target, rel, data):
+    """Create one file, write-ahead style: the entry goes to disk with
+    status 'creating' and the sha256 of the bytes about to be written
+    BEFORE the write, then becomes 'created' or 'failed'. Restore
+    deletes the file again, but only while its hash still matches -- a
+    file modified after the run is kept and reported as skipped. data
+    may be str (written as UTF-8) or bytes. Returns the entry index;
+    raises whatever the write raised after marking the entry 'failed'."""
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    target = Path(target)
+    idx = run.add_entry({
+        'opid': run.opid,
+        'action': ACTION_CREATE_FILE,
+        'original_path': os.path.normpath(str(rel)),
+        'trash_path': None,
+        'size': len(data),
+        'mtime_ns': None,
+        'type': 'file',
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'parent_exists': _exists(target.parent),
+        'moved_at': _iso_now(),
+        'status': 'creating',
+        'restorable': True,
+    })
+    try:
+        target.write_bytes(data)
+    except Exception as exc:
+        run.update_entry(idx, status='failed',
+                         error='%s: %s' % (type(exc).__name__, exc))
+        raise
+    run.update_entry(idx, status='created')
+    return idx
+
+
+def record_create_directory(run, target, rel, snap=None):
+    """mkdir one directory, write-ahead style: entry status 'creating'
+    before os.mkdir (which refuses an existing path), 'created' after.
+    Restore removes the directory again, but only while it is still
+    empty -- one that gained content is kept and reported as skipped."""
+    target = Path(target)
+    idx = run.add_entry({
+        'opid': run.opid,
+        'action': ACTION_CREATE_DIRECTORY,
+        'original_path': os.path.normpath(str(rel)),
+        'trash_path': None,
+        'size': (snap or {}).get('size') or 0,
+        'mtime_ns': (snap or {}).get('mtime_ns'),
+        'type': (snap or {}).get('type') or 'dir',
+        'parent_exists': _exists(target.parent),
+        'moved_at': _iso_now(),
+        'status': 'creating',
+        'restorable': True,
+    })
+    try:
+        os.mkdir(str(target))
+    except Exception as exc:
+        run.update_entry(idx, status='failed',
+                         error='%s: %s' % (type(exc).__name__, exc))
+        raise
+    run.update_entry(idx, status='created')
+    return idx
+
+
 def find_interrupted(root):
     """Scan <root>/<TRASH_DIR_NAME>/*/manifest.json for in-flight
-    entries ('moving'/'removing'). Returns the opid of the most recent
-    interrupted run (by manifest mtime), or None. Interrupted runs are
-    never modified or resumed by this call -- the caller only records
-    the opid."""
+    entries ('moving'/'removing'/'creating'). Returns the opid of the
+    most recent interrupted run (by manifest mtime), or None.
+    Interrupted runs are never modified or resumed by this call -- the
+    caller only records the opid."""
     trash = Path(root) / TRASH_DIR_NAME
     best_mtime, best_opid = None, None
     try:
@@ -307,21 +416,127 @@ def find_interrupted(root):
 
 # --- restore ------------------------------------------------------------------------
 
+def _sha256_file(path):
+    """sha256 hex digest of a file's current bytes, read in chunks."""
+    h = hashlib.sha256()
+    with open(str(path), 'rb') as fh:
+        for chunk in iter(lambda: fh.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _entry_action(entry):
+    """Normalized action of a manifest entry: version 1 wrote 'trash'
+    for what version 2 calls trash_move; both spellings keep working."""
+    action = entry.get('action', ACTION_TRASH_MOVE)
+    return ACTION_TRASH_MOVE if action == 'trash' else action
+
+
+def _undo_target(root, orig):
+    """Validated absolute destination for undoing original_path: the
+    relative shape must be safe and the resolved path must stay under
+    root and out of the trash folder. Raises ValueError otherwise."""
+    if not _rel_shape_ok(orig):
+        raise ValueError('path has an unsafe shape')
+    dst = root / os.path.normpath(orig)
+    resolved = dst.resolve()
+    if root not in resolved.parents \
+            or resolved.parts[len(root.parts)] == TRASH_DIR_NAME:
+        raise ValueError('original path escapes root or sits in the '
+                         'trash folder')
+    return dst
+
+
+def _undo_entry(run_dir, root, entry):
+    """Undo one manifest entry (its status is 'restoring' by the time
+    this runs). Returns ('restored', dst_path) on success, or
+    ('skipped', reason) when the disk moved on after the run and
+    undoing now would destroy someone else's work. Raises when the
+    attempt belongs in the summary as a failure."""
+    action = _entry_action(entry)
+    orig = str(entry.get('original_path') or '')
+    if action == ACTION_TRASH_MOVE:
+        trash_rel = str(entry.get('trash_path') or '')
+        if not _rel_shape_ok(trash_rel):
+            raise ValueError('trash path has an unsafe shape')
+        src = run_dir / trash_rel
+        if not _is_under(src, run_dir) or not _exists(src):
+            raise ValueError('trash copy missing or outside the run dir: %s'
+                             % trash_rel)
+        dst = _undo_target(root, orig)
+        if _exists(dst):
+            for n in range(1, 1000):
+                cand = dst.parent / ('%s.restored-%d' % (dst.name, n))
+                if not _exists(cand):
+                    dst = cand
+                    break
+            else:
+                raise OSError('no free restore destination for %s' % dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        return 'restored', dst
+    if action == ACTION_RMDIR:
+        # an empty directory costs nothing to recreate, parents included;
+        # one that already came back is a plain success
+        dst = _undo_target(root, orig)
+        os.makedirs(str(dst), exist_ok=True)
+        return 'restored', dst
+    if action == ACTION_CREATE_FILE:
+        dst = _undo_target(root, orig)
+        if not _exists(dst):
+            return 'restored', dst      # already gone: the undo state holds
+        sha = entry.get('sha256')
+        if not sha:
+            return 'skipped', 'no sha256 recorded; file left in place'
+        if _sha256_file(dst) != sha:
+            return 'skipped', 'file was modified after the run; left in place'
+        os.remove(str(dst))
+        return 'restored', dst
+    if action == ACTION_CREATE_DIRECTORY:
+        dst = _undo_target(root, orig)
+        if not _exists(dst):
+            return 'restored', dst      # already gone
+        if any(dst.iterdir()):
+            return 'skipped', 'directory gained content after the run; ' \
+                             'left in place'
+        os.rmdir(str(dst))
+        return 'restored', dst
+    raise ValueError('unknown action: %r' % (entry.get('action'),))
+
+
 def restore(run_dir, root=None, opid=None, assume_yes=False, confirm=None):
-    """Put the 'moved' entries of one trash run back.
+    """Undo one journaled run: every restorable entry goes back to the
+    pre-run state, whatever the operation type was.
 
     Reads <run_dir>/manifest.json, asks for the word YES (assume_yes
-    exists for tests and automation only), then moves every trash entry
-    whose status is 'moved' (or 'restore_failed' from an earlier
-    attempt) back to root/<original_path>. When that spot is occupied
-    the file lands next to it as <name>.restored-N, never overwriting.
-    Entries with action 'rmdir' are counted as not restorable and
-    skipped. Both sides are containment-checked: the trash copy must
-    stay under the run dir, the target under root. Each restore is
-    itself write-ahead ('restoring' before the move), and the entry
-    ends as 'restored' (with restored_to) or 'restore_failed' (with
-    error). Returns a summary dict; raises ValueError when the run
-    directory has no readable manifest or the opid does not match."""
+    exists for tests and automation only), then undoes every entry
+    whose status is 'moved', 'removed', 'created' or 'restore_failed'
+    and whose restorable flag is true:
+
+    - trash_move: the trash copy moves back to root/<original_path>,
+      or next to it as <name>.restored-N when that spot is occupied,
+      never overwriting;
+    - rmdir: the empty directory is recreated (os.makedirs, parents
+      included);
+    - create_file: the file is deleted again, but only while its
+      sha256 still matches the manifest -- a file modified after the
+      run is kept and reported as skipped;
+    - create_directory: the directory is removed again, but only while
+      it is still empty -- one that gained content is kept and
+      reported as skipped.
+
+    Manifests without manifest_schema_version (version 1) are read the
+    same way; their rmdir entries say restorable: false and are
+    counted as not restorable instead of being undone. Both sides are
+    containment-checked: the trash copy must stay under the run dir,
+    every undo target under root. Each undo is itself write-ahead
+    ('restoring' before the act), and the entry ends as 'restored'
+    (with restored_to) or 'restore_failed' (with error); a skipped
+    undo keeps its previous status so a later restore can retry it.
+    Restoring an already-restored entry is a no-op counted as
+    already_done. Returns a summary dict; raises ValueError when the
+    run directory has no readable manifest or the opid does not
+    match."""
     run_dir = Path(run_dir)
     data = load_manifest(run_dir)
     mopid = data.get('opid')
@@ -337,19 +552,22 @@ def restore(run_dir, root=None, opid=None, assume_yes=False, confirm=None):
     entries = data.get('entries') or []
     summary = {'declined': False, 'run_dir': str(run_dir.resolve()),
                'manifest_path': str(run_dir / MANIFEST_NAME), 'opid': mopid,
+               'manifest_schema_version':
+                   str(data.get('manifest_schema_version') or SCHEMA_V1),
                'root': str(root), 'restored': [], 'failed': [],
-               'not_restorable': 0, 'already_done': 0}
+               'skipped': [], 'not_restorable': 0, 'already_done': 0}
     todo = [i for i, e in enumerate(entries)
             if isinstance(e, dict)
-            and e.get('action', 'trash') == 'trash'
-            and e.get('status') in RESTORABLE]
+            and _entry_action(e) in ACTIONS
+            and e.get('status') in RESTORABLE
+            and e.get('restorable', True)]
     summary['already_done'] = sum(
         1 for e in entries
         if isinstance(e, dict) and e.get('status') == 'restored')
     summary['not_restorable'] = sum(
         1 for e in entries
-        if isinstance(e, dict) and e.get('action') == 'rmdir'
-        and e.get('status') == 'removed')
+        if isinstance(e, dict) and not e.get('restorable', True)
+        and e.get('status') in DONE_STATUSES)
     if not todo:
         return summary            # nothing restorable: no prompt, no changes
 
@@ -365,45 +583,37 @@ def restore(run_dir, root=None, opid=None, assume_yes=False, confirm=None):
 
     for i in todo:
         e = entries[i]
+        action = _entry_action(e)
         orig = str(e.get('original_path') or '')
-        trash_rel = str(e.get('trash_path') or '')
+        prev_status = e.get('status')
+        e['status'] = 'restoring'
+        save_manifest(run_dir, data)
         try:
-            if not _rel_shape_ok(orig) or not _rel_shape_ok(trash_rel):
-                raise ValueError('path has an unsafe shape')
-            src = run_dir / trash_rel
-            if not _is_under(src, run_dir) or not _exists(src):
-                raise ValueError('trash copy missing or outside the run dir: %s'
-                                 % trash_rel)
-            dst = root / os.path.normpath(orig)
-            resolved = dst.resolve()
-            if root not in resolved.parents \
-                    or resolved.parts[len(root.resolve().parts)] == TRASH_DIR_NAME:
-                raise ValueError('original path escapes root or sits in the '
-                                 'trash folder')
-            if _exists(dst):
-                for n in range(1, 1000):
-                    cand = dst.parent / ('%s.restored-%d' % (dst.name, n))
-                    if not _exists(cand):
-                        dst = cand
-                        break
-                else:
-                    raise OSError('no free restore destination for %s' % dst)
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            e['status'] = 'restoring'
-            save_manifest(run_dir, data)
-            shutil.move(str(src), str(dst))
+            kind, detail = _undo_entry(run_dir, root, e)
         except Exception as exc:
             e['status'] = 'restore_failed'
             e['error'] = '%s: %s' % (type(exc).__name__, exc)
             save_manifest(run_dir, data)
             summary['failed'].append({'original_path': orig,
+                                      'action': action,
                                       'error': e['error']})
             continue
+        if kind == 'skipped':
+            # not done, not failed: the entry stays as it was and a
+            # later restore can retry it once the disk allows
+            e['status'] = prev_status
+            save_manifest(run_dir, data)
+            print('warning: %s (%s) not restored: %s'
+                  % (orig, action, detail), file=sys.stderr)
+            summary['skipped'].append({'original_path': orig,
+                                       'action': action, 'reason': detail})
+            continue
+        dst = detail
         e['status'] = 'restored'
         e['restored_to'] = dst.relative_to(root).as_posix()
         e['restored_at'] = _iso_now()
         e.pop('error', None)
         save_manifest(run_dir, data)
-        summary['restored'].append({'original_path': orig,
+        summary['restored'].append({'original_path': orig, 'action': action,
                                     'restored_to': e['restored_to']})
     return summary

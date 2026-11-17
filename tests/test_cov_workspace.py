@@ -165,18 +165,19 @@ class ReportFlagVariants(CliCase):
 class FocusFilters(CliCase):
     def test_focus_structure_keeps_structure_gates_only(self):
         _out_json, rep, out = self.audit(extra=['--focus', 'structure'])
-        self.assertEqual({g['gid'] for g in rep['gates']}, {'G1', 'G2', 'G4'})
-        cats = {f['category'] for f in rep['findings_detailed']}
-        self.assertTrue(cats <= {'dirs', 'config'}, cats)
+        self.assertEqual({g['gid'] for g in rep['gates']}, {'G1', 'G4', 'G9'})
+        gates = {f['gate'] for f in rep['findings_detailed']}
+        self.assertTrue(gates <= {'G1', 'G4', 'G9'}, gates)
         self.assertEqual(rep.get('focus'), 'structure')
         self.assertIn('(focus: structure)', out)
         self.assertIn('gates: fail', out)  # the tally line stays
 
     def test_focus_agents_keeps_agents_gates_only(self):
         _out_json, rep, out = self.audit(extra=['--focus', 'agents'])
-        self.assertEqual({g['gid'] for g in rep['gates']}, {'G3', 'G5', 'G8'})
-        cats = {f['category'] for f in rep['findings_detailed']}
-        self.assertTrue(cats <= {'rules', 'skills', 'governance'}, cats)
+        self.assertEqual({g['gid'] for g in rep['gates']},
+                         {'G2', 'G3', 'G5', 'G8'})
+        gates = {f['gate'] for f in rep['findings_detailed']}
+        self.assertTrue(gates <= {'G2', 'G3', 'G5', 'G8'}, gates)
         self.assertEqual(rep.get('focus'), 'agents')
         self.assertIn('(focus: agents)', out)
 

@@ -4,6 +4,9 @@
 Fixture (temp): a small workspace with two junk files. Each test moves
 them into a trash run via safe_clean.execute on a hand-built plan, then
 exercises restore() against the run directory and its manifest.
+Manifest schema v2 also restores removed empty directories; the wider
+rollback matrix (create_file, create_directory, mixed batches, v1
+compat) lives in test_rollback.py.
 """
 import json
 import os
@@ -148,18 +151,43 @@ class Confirmation(RestoreCase):
                          b'contents of a\n' * 5)
 
     def test_nothing_restorable_never_prompts(self):
-        (self.ws / 'empty1').mkdir()
-        summary = self.execute(crafted_plan(self.ws, rmdir_rels=('empty1',)))
+        summary = self.execute(crafted_plan(self.ws, 'a.txt'))
+        trashops.restore(Path(summary['trash_dir']), self.ws, assume_yes=True)
+        # everything already restored: a second restore must not prompt
         with mock.patch('builtins.input',
                         side_effect=AssertionError('prompted with nothing '
                                                    'to restore')):
             res = trashops.restore(Path(summary['trash_dir']), self.ws)
         self.assertFalse(res['declined'])
         self.assertEqual(res['restored'], [])
-        self.assertEqual(res['not_restorable'], 1)
+        self.assertEqual(res['failed'], [])
+        self.assertEqual(res['already_done'], 1)
+        self.assertTrue((self.ws / 'a.txt').is_file())   # and nothing moved
+
+
+class RmdirRoundTrip(RestoreCase):
+    """Schema v2: removed empty directories are restorable again."""
+
+    def test_rmdir_run_restores_the_empty_dirs(self):
+        (self.ws / 'empty1').mkdir()
+        (self.ws / 'empty2').mkdir()
+        summary = self.execute(crafted_plan(self.ws, rmdir_rels=('empty1',
+                                                                 'empty2')))
+        self.assertFalse((self.ws / 'empty1').exists())
         data = self.manifest(summary)
-        self.assertEqual(data['entries'][0]['action'], 'rmdir')
-        self.assertFalse(data['entries'][0]['restorable'])
+        self.assertEqual(data['manifest_schema_version'], '2')
+        self.assertTrue(all(e['restorable'] for e in data['entries']))
+
+        res = trashops.restore(Path(summary['trash_dir']), self.ws,
+                               assume_yes=True)
+
+        self.assertEqual(res['failed'], [])
+        self.assertEqual(sorted(r['original_path'] for r in res['restored']),
+                         ['empty1', 'empty2'])
+        self.assertTrue((self.ws / 'empty1').is_dir())
+        self.assertTrue((self.ws / 'empty2').is_dir())
+        self.assertTrue(all(e['status'] == 'restored'
+                            for e in self.manifest(summary)['entries']))
 
 
 def prompt_needs_yes(prompt):

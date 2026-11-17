@@ -25,15 +25,18 @@ Safety model:
   ('.agents-doctor-trash'); the generated .gitignore template lists
   it, and trash moves never overwrite an existing destination (a taken
   name gets an '.__N__' suffix, see trashops.py);
-- trash moves go through trashops.move_to_trash: per-run operation id,
-  write-ahead manifest.json in the run directory, crash-recovery
-  detection of interrupted earlier runs. Undo a run with
+- every mutating step is journaled through trashops (move_to_trash,
+  record_rmdir, record_create_file): per-run operation id, write-ahead
+  manifest.json in the run directory, crash-recovery detection of
+  interrupted earlier runs. Undo a whole run -- moved files, removed
+  empty directories, written .gitignore files -- with
   `safe_clean.py restore <run_dir>`;
 - every planned target carries a plan-time TOCTOU snapshot {size,
   mtime_ns, type}; apply re-stats rmdir and trash_move steps right
   before acting and skips the step as 'changed' when the path changed
   since planning;
-- rmdir goes through os.rmdir: a non-empty directory fails loudly;
+- rmdir goes through os.rmdir (a non-empty directory fails loudly) and
+  is journaled, so restore can recreate the empty directory;
 - a failing step is recorded and the run continues with the next step;
 - no network access, no git mutations, no overwrites.
 
@@ -289,9 +292,12 @@ def print_plan(fid, steps):
 def _execute_step(step, root, get_run):
     """Run one step; returns an executed-record dict, SKIPPED or
     CHANGED. get_run() lazily creates the shared trash run (opid +
-    manifest) the first time a trash_move step needs it."""
+    manifest) the first time a step needs it. Every mutating action --
+    trash_move, rmdir, write_gitignore -- is journaled in that run's
+    write-ahead manifest, so the whole plan is one undoable unit."""
     action = step.get('action')
     target = Path(step.get('target', ''))
+    cur = None
     if action in ('rmdir', 'trash_move'):
         # TOCTOU re-stat right before acting: anything that changed
         # since plan() is skipped as CHANGED, disk untouched
@@ -299,15 +305,22 @@ def _execute_step(step, root, get_run):
         if not trashops.unchanged(step.get('snapshot'), cur):
             return CHANGED
     if action == 'rmdir':
-        os.rmdir(str(target))  # loud failure when not empty or missing
-        return {'action': action, 'target': str(target), 'result': 'removed'}
+        rel = target.resolve().relative_to(root).as_posix()
+        run = get_run()
+        # os.rmdir inside: loud failure when not empty or missing
+        trashops.record_rmdir(run, target, rel, cur)
+        return {'action': action, 'target': str(target), 'result': 'removed',
+                'trash_run': str(run.run_dir), 'opid': run.opid}
     if action == 'write_gitignore':
         if target.exists():
             return SKIPPED  # never overwrite an existing .gitignore
         if not target.parent.is_dir():
             raise OSError('parent directory missing: %s' % target.parent)
-        target.write_text(gitignore_template(), encoding='utf-8')
-        return {'action': action, 'target': str(target), 'result': 'created'}
+        rel = target.resolve().relative_to(root).as_posix()
+        run = get_run()
+        trashops.record_create_file(run, target, rel, gitignore_template())
+        return {'action': action, 'target': str(target), 'result': 'created',
+                'trash_run': str(run.run_dir), 'opid': run.opid}
     if action == 'trash_move':
         src = target
         if not src.exists():
@@ -333,9 +346,10 @@ def apply_plan(steps, root, assume_yes=False):
     is containment-checked against the resolved root before anything
     runs. A failing step is recorded and the run continues with the
     next step; a step whose target changed since plan() is skipped as
-    {'reason': 'changed'}. Trash moves land in one trash run directory
-    (timestamp + opid) with a write-ahead manifest, undoable via
-    `safe_clean.py restore <run_dir>`.
+    {'reason': 'changed'}. Every mutating step -- trash moves, rmdirs,
+    written .gitignore files -- is journaled in one trash run directory
+    (timestamp + opid) with a write-ahead manifest, so the whole plan
+    is undoable in one `safe_clean.py restore <run_dir>`.
 
     Returns {'executed': [...], 'failed': [...], 'skipped': [...],
     'declined': bool, 'trash_run': str|None, 'opid': str|None};
@@ -402,7 +416,9 @@ def apply_plan(steps, root, assume_yes=False):
                       if e.get('action') == 'trash_move'),
             failed=len(report['failed']), skipped=len(report['skipped']),
             removed_dirs=sum(1 for e in report['executed']
-                             if e.get('action') == 'rmdir'))
+                             if e.get('action') == 'rmdir'),
+            created=sum(1 for e in report['executed']
+                        if e.get('action') == 'write_gitignore'))
     return report
 
 

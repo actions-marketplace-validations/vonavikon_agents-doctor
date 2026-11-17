@@ -425,6 +425,7 @@ class RunDirAndManifest(SafeCleanCase):
 
         data = json.loads((run_dir / 'manifest.json').read_text(encoding='utf-8'))
         self.assertEqual(data['opid'], summary['opid'])
+        self.assertEqual(data['manifest_schema_version'], '2')
         self.assertEqual(data['tool'], 'safe_clean')
         self.assertEqual(data['root'], summary['root'])
         self.assertIn('started_at', data)
@@ -435,7 +436,7 @@ class RunDirAndManifest(SafeCleanCase):
                          len(summary['removed_dirs']))
 
         moved = {e['original_path']: e for e in data['entries']
-                 if e['action'] == 'trash'}
+                 if e['action'] == 'trash_move'}
         self.assertEqual(set(moved), {m['path'] for m in summary['moved']})
         entry = moved['screenshot_1.png']
         self.assertEqual(entry['status'], 'moved')
@@ -449,7 +450,8 @@ class RunDirAndManifest(SafeCleanCase):
                          {d['path'] for d in summary['removed_dirs']})
         for e in rmdirs:
             self.assertEqual(e['status'], 'removed')
-            self.assertFalse(e['restorable'])
+            self.assertTrue(e['restorable'])
+            self.assertTrue(e['parent_exists'])
 
     def test_summary_text_prints_run_dir_opid_manifest_and_restore_cmd(self):
         plan = safe_clean.build_plan(self.rep)

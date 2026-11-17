@@ -555,8 +555,8 @@ def summary_text(summary):
         lines.append('To undo this run: python %s.py restore "%s" --root "%s"'
                      % (Path(__file__).stem, summary['trash_dir'],
                         summary.get('root') or ''))
-    lines.append('Removed empty folders cannot be restored; everything '
-                 'else can (see the command above).')
+    lines.append('Everything this run changed can be undone with the '
+                 'command above, removed empty folders included.')
     lines.append('The trash is never emptied automatically; delete it by '
                  'hand once you are satisfied.')
     if summary.get('skipped_safety'):
