@@ -1,0 +1,170 @@
+[
+  {
+    "harness": "zcode",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "documented",
+      "instruction_hierarchy": "approximated",
+      "loading_order": "approximated",
+      "imports": "unsupported",
+      "glob_matching": "unsupported",
+      "nested_instructions": "unsupported",
+      "skills": "documented",
+      "mcp": "documented",
+      "permissions": "unknown",
+      "context_budget": "documented",
+      "version_detect": "unknown",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": ""
+  },
+  {
+    "harness": "claude_code",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "documented",
+      "instruction_hierarchy": "approximated",
+      "loading_order": "approximated",
+      "imports": "approximated",
+      "glob_matching": "approximated",
+      "nested_instructions": "approximated",
+      "skills": "documented",
+      "mcp": "documented",
+      "permissions": "documented",
+      "context_budget": "unsupported",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://docs.anthropic.com/en/docs/claude-code"
+  },
+  {
+    "harness": "codex",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "documented",
+      "instruction_hierarchy": "documented",
+      "loading_order": "documented",
+      "imports": "unsupported",
+      "glob_matching": "unsupported",
+      "nested_instructions": "approximated",
+      "skills": "unknown",
+      "mcp": "documented",
+      "permissions": "documented",
+      "context_budget": "approximated",
+      "version_detect": "approximated",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://developers.openai.com/codex"
+  },
+  {
+    "harness": "cursor",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "unsupported",
+      "instruction_hierarchy": "documented",
+      "loading_order": "approximated",
+      "imports": "unsupported",
+      "glob_matching": "approximated",
+      "nested_instructions": "unsupported",
+      "skills": "unsupported",
+      "mcp": "documented",
+      "permissions": "unknown",
+      "context_budget": "unknown",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://docs.cursor.com/context/rules"
+  },
+  {
+    "harness": "gemini_cli",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "documented",
+      "instruction_hierarchy": "approximated",
+      "loading_order": "documented",
+      "imports": "approximated",
+      "glob_matching": "unsupported",
+      "nested_instructions": "documented",
+      "skills": "documented",
+      "mcp": "documented",
+      "permissions": "unknown",
+      "context_budget": "unknown",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://docs.gemini-cli / https://github.com/google-gemini/gemini-cli"
+  },
+  {
+    "harness": "opencode",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "documented",
+      "instruction_hierarchy": "documented",
+      "loading_order": "approximated",
+      "imports": "unsupported",
+      "glob_matching": "unsupported",
+      "nested_instructions": "documented",
+      "skills": "documented",
+      "mcp": "approximated",
+      "permissions": "documented",
+      "context_budget": "unknown",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://opencode.ai/docs/config/"
+  },
+  {
+    "harness": "github_copilot",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "unknown",
+      "instruction_hierarchy": "documented",
+      "loading_order": "approximated",
+      "imports": "unsupported",
+      "glob_matching": "approximated",
+      "nested_instructions": "unsupported",
+      "skills": "documented",
+      "mcp": "approximated",
+      "permissions": "unsupported",
+      "context_budget": "approximated",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://docs.github.com/en/copilot"
+  },
+  {
+    "harness": "windsurf",
+    "version": "1.0.0",
+    "capabilities": {
+      "detection": "documented",
+      "user_settings": "unsupported",
+      "instruction_hierarchy": "documented",
+      "loading_order": "approximated",
+      "imports": "unsupported",
+      "glob_matching": "approximated",
+      "nested_instructions": "unsupported",
+      "skills": "unsupported",
+      "mcp": "documented",
+      "permissions": "unsupported",
+      "context_budget": "unknown",
+      "version_detect": "unsupported",
+      "spec_freshness": "documented"
+    },
+    "tested_at": "2026-11-17",
+    "spec_source": "https://docs.windsurf.com/windsurf/cascade/rules"
+  }
+]

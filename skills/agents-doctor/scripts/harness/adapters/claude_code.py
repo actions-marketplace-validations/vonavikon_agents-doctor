@@ -144,6 +144,48 @@ class ClaudeCodeAdapter(HarnessAdapter):
         'no documented instruction context budget',
     ]
 
+    # --- conformance (TZ 3.0 section 5): honesty status per capability.
+    # Nothing in this adapter runs against a real Claude Code, so
+    # 'runtime-tested' never appears: every claim traces to the
+    # Anthropic docs (spec_source) or to a known_limitations entry.
+    CAPABILITY_STATUS = {
+        # .claude/, CLAUDE.md and .mcp.json are documented project
+        # artifacts; the detection engine just combines them
+        'detection': 'documented',
+        # settings.json / settings.local.json at the three documented
+        # locations (project, project-local, user home)
+        'user_settings': 'documented',
+        # memory/rules layers are documented, but the numeric precedence
+        # (rules 40 > nested 30 > project 20 > user 10) and the
+        # collision model are ours; enterprise policies not modelled
+        'instruction_hierarchy': 'approximated',
+        # offline model: every chain keeps approximated=True, and the
+        # documented lazy loading is modelled as path-based inclusion
+        'loading_order': 'approximated',
+        # the 5-hop cap is documented; regex @path extraction and the
+        # importer-dir-then-root fallback are approximations
+        'imports': 'approximated',
+        # fnmatch plus a **/-suffix directory rule, not the real matcher
+        'glob_matching': 'approximated',
+        # documented lazy loading modelled as path-based inclusion
+        # (first known_limitations entry)
+        'nested_instructions': 'approximated',
+        # .claude/skills, .claude/commands and ~/.claude/plugins are
+        # documented locations (locations only; no skill parsing)
+        'skills': 'documented',
+        # .mcp.json plus mcpServers in settings are documented
+        'mcp': 'documented',
+        # permissions.allow rule syntax and the bypass flags per docs
+        'permissions': 'documented',
+        # docs define no instruction budget (known_limitations), so
+        # context_budget_bytes() deliberately returns None
+        'context_budget': 'unsupported',
+        # no offline version source exists; detect_version never guesses
+        'version_detect': 'unsupported',
+        # spec_source re-verified on spec_verified (2026-11-17)
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.claude', 'CLAUDE.md', '.mcp.json', '.claude/settings.json']

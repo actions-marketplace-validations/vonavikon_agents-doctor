@@ -19,6 +19,34 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# --- conformance vocabulary (TZ 3.0 section 5.2) ----------------------
+# Every adapter capability carries one of these honesty statuses. They
+# describe HOW WE KNOW something, separate from whether it works.
+CAPABILITY_STATUSES = (
+    'documented',        # confirmed against official documentation
+    'runtime-tested',    # verified experimentally on a real runtime
+    'approximated',      # an approximate model (documented deviations)
+    'unsupported',       # deliberately not modelled yet
+    'unknown',           # not enough data — the default
+)
+
+# The capability names every adapter is graded on (TZ section 5.3).
+CAPABILITY_KEYS = (
+    'detection',              # project + home discovery
+    'user_settings',          # user-level configuration discovery
+    'instruction_hierarchy',  # instruction sources + precedence model
+    'loading_order',          # what loads for a target directory
+    'imports',                # @import-style indirection
+    'glob_matching',          # path-scoped rules semantics
+    'nested_instructions',    # subdirectory instruction loading
+    'skills',                 # skill locations and parsing
+    'mcp',                    # MCP configuration knowledge
+    'permissions',            # permission/sandbox model
+    'context_budget',         # documented budget limits
+    'version_detect',         # installed-version detection
+    'spec_freshness',         # how recent the doc verification is
+)
+
 
 @dataclass
 class HarnessContext:
@@ -172,6 +200,11 @@ class HarnessAdapter:
     spec_verified: str = ''         # 'YYYY-MM-DD' of the last check
     supported_versions: str = ''    # free text, '' = unverified
     known_limitations: list = []    # human-readable strings
+    # --- conformance (TZ 3.0 section 5): per-capability honesty status.
+    # Keys are capability names from CAPABILITY_KEYS; values from
+    # CAPABILITY_STATUSES. A capability absent here reads as 'unknown'
+    # downstream — never as pass.
+    CAPABILITY_STATUS: dict = {}
 
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
@@ -236,6 +269,10 @@ class HarnessAdapter:
         return []
 
     def spec_info(self) -> dict:
+        statuses = {}
+        for key in CAPABILITY_KEYS:
+            raw = self.CAPABILITY_STATUS.get(key, 'unknown')
+            statuses[key] = raw if raw in CAPABILITY_STATUSES else 'unknown'
         return {
             'harness_id': self.harness_id,
             'display_name': self.display_name,
@@ -244,4 +281,20 @@ class HarnessAdapter:
             'spec_verified': self.spec_verified,
             'supported_versions': self.supported_versions,
             'known_limitations': list(self.known_limitations),
+            'capability_status': statuses,
         }
+
+    def adapter_quality(self) -> dict:
+        """Diagnostic quality of THIS adapter (TZ 5.5) — deliberately
+        separate from workspace health. Statuses map to evidence
+        weights; the score is a simple mean, printed with the formula
+        so nobody has to trust a bare number. unsupported/unknown
+        score 0 — they are gaps, not achievements."""
+        weights = {'runtime-tested': 1.0, 'documented': 0.75,
+                   'approximated': 0.4, 'unsupported': 0.0,
+                   'unknown': 0.0}
+        statuses = self.spec_info()['capability_status']
+        per = {k: weights[v] for k, v in statuses.items()}
+        score = round(sum(per.values()) / len(per), 2) if per else 0.0
+        return {'score': score, 'weights': weights,
+                'per_capability': statuses}

@@ -194,6 +194,50 @@ class GithubCopilotAdapter(HarnessAdapter):
         'check only, no full YAML parse)',
     ]
 
+    # --- conformance: how we know each capability (TZ 3.0 section 5).
+    # No runtime verification exists for this adapter, so 'runtime-tested'
+    # never appears; every entry cites where the knowledge comes from.
+    CAPABILITY_STATUS = {
+        # .github/copilot-instructions.md, instructions/, prompts/ are
+        # the documented repo-level markers; no home markers exist by
+        # design (see user_settings)
+        'detection': 'documented',
+        # global ("personal") instructions are edited in the editor
+        # settings UI, not stored as a scannable file — no data offline
+        'user_settings': 'unknown',
+        # main file + applyTo-scoped instructions/*.md + on-demand
+        # prompts follow the documented repo-instructions model
+        'instruction_hierarchy': 'documented',
+        # precedence numbers (main 20, scoped 30) and root-level glob
+        # matching are this adapter's model, not runtime-verified
+        'loading_order': 'approximated',
+        # Copilot instruction files document no @import indirection;
+        # there is nothing to parse, so none is modelled
+        'imports': 'unsupported',
+        # applyTo globs are documented, but matching rides the
+        # fnmatch + dir-prefix heuristic shared with the cursor adapter
+        'glob_matching': 'approximated',
+        # Copilot has no per-subdirectory instruction files; path
+        # scoping is glob-based (applyTo), so nesting is not modelled
+        'nested_instructions': 'unsupported',
+        # .github/prompts and .github/agents are the documented
+        # locations; frontmatter expectations checked by validate()
+        'skills': 'documented',
+        # mcp.json is parsed fully, but copilot-mcp.yml only gets the
+        # heuristic top-level-key check (no full YAML parse)
+        'mcp': 'approximated',
+        # Copilot has no repo-level permission config; permission
+        # toggles live in editor settings, deliberately not modelled
+        'permissions': 'unsupported',
+        # Copilot trims bloated main instructions, but the exact 25KB
+        # threshold is this adapter's approximation of "keep it short"
+        'context_budget': 'approximated',
+        # detect_version always returns None — never guess offline
+        'version_detect': 'unsupported',
+        # spec_verified refreshed against docs.github.com/en/copilot
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.github/copilot-instructions.md', '.github/instructions',

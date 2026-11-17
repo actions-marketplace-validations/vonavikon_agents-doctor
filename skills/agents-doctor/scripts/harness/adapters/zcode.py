@@ -34,6 +34,50 @@ class ZcodeAdapter(HarnessAdapter):
     known_limitations = [
         'nested AGENTS.md merging not modelled; only user + project root',
     ]
+    # --- conformance statuses (TZ 3.0 section 5). This dict is the
+    # reference pattern for other adapters: every line names its
+    # capability, its status and WHY — a status without a reason here
+    # is unreviewable. Absent keys read as 'unknown' downstream.
+    CAPABILITY_STATUS = {
+        # markers are plain filesystem paths (.agents, .zcode/config.json,
+        # AGENTS.md, ~/.zcode) — a filesystem fact, not a model
+        'detection': 'documented',
+        # user-level config ~/.zcode/config.json is a known, parsed file
+        'user_settings': 'documented',
+        # only user + project scopes, project wins; the precedence model
+        # is ours, not verified against the CLI runtime (see
+        # known_limitations: no nested merging)
+        'instruction_hierarchy': 'approximated',
+        # "both levels load, project scope wins" is a model; we never
+        # observed the runtime merge order
+        'loading_order': 'approximated',
+        # @import-style indirection is not implemented and not modelled
+        'imports': 'unsupported',
+        # path-scoped rules (globs) do not exist in Z Code instructions
+        'glob_matching': 'unsupported',
+        # subdirectory AGENTS.md is not loaded in our model — a real
+        # limitation we chose not to approximate (known_limitations[0])
+        'nested_instructions': 'unsupported',
+        # skill locations (~/.zcode/skills, .agents/skills, plugin cache)
+        # are documented CLI layout
+        'skills': 'documented',
+        # MCP servers live in .zcode/config.json under mcp.servers —
+        # documented config shape
+        'mcp': 'documented',
+        # sandbox/permission model of the CLI is not described anywhere
+        # we could verify — no status claimed
+        'permissions': 'unknown',
+        # the documented budget is the MEMORY.md limit (24985 bytes /
+        # 200 lines, enforced by ZCODE_MEMORY_OVER_LIMIT); instruction
+        # files themselves have no known budget
+        'context_budget': 'documented',
+        # the CLI does not expose its version to offline inspection and
+        # detect_version is not implemented
+        'version_detect': 'unknown',
+        # spec_verified is maintained above (2026-11-17) and re-checked
+        # when the adapter changes
+        'spec_freshness': 'documented',
+    }
 
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.agents', '.zcode/config.json', 'AGENTS.md']

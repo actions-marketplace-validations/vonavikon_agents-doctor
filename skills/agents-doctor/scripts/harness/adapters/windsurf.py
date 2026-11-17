@@ -90,6 +90,52 @@ class WindsurfAdapter(HarnessAdapter):
         'glob semantics approximated with fnmatch + dir-prefix',
     ]
 
+    # --- conformance: how we know each capability (TZ 3.0 section 5).
+    # No runtime verification exists for this adapter, so 'runtime-tested'
+    # never appears; every entry cites where the knowledge comes from.
+    CAPABILITY_STATUS = {
+        # .windsurf/ and .windsurfrules are the documented project
+        # markers; home markers stay empty by design (app data is an
+        # unreliable installation signal)
+        'detection': 'documented',
+        # global state (memories, app settings) lives in Windsurf app
+        # data — known to exist, deliberately not modelled (unreliable
+        # marker, no documented offline layout)
+        'user_settings': 'unsupported',
+        # rules/*.md trigger classification (always/glob/manual/
+        # model_decision) plus the legacy .windsurfrules layer follow
+        # the documented rules system
+        'instruction_hierarchy': 'documented',
+        # precedence numbers (always 30, glob 20, legacy 10) are this
+        # adapter's model of the documented activation order, not
+        # runtime-verified
+        'loading_order': 'approximated',
+        # Windsurf rules document no @import-style indirection; there
+        # is nothing to parse, so none is modelled
+        'imports': 'unsupported',
+        # trigger globs are documented, but matching rides the
+        # fnmatch + dir-prefix heuristic shared with the cursor adapter
+        'glob_matching': 'approximated',
+        # Windsurf has no per-subdirectory rule files; scoping is
+        # glob-trigger based, so nested loading is not modelled
+        'nested_instructions': 'unsupported',
+        # .windsurf/workflows is exposed as a location, but workflow
+        # internals are deliberately not modelled (known limitation)
+        'skills': 'unsupported',
+        # .windsurf/mcp_config.json and its mcpServers key are
+        # documented; the file is parsed fully as JSON
+        'mcp': 'documented',
+        # Windsurf has no repo-level permission config; guards live in
+        # app settings, deliberately not modelled
+        'permissions': 'unsupported',
+        # no instruction-size budget in the docs; budget stays None
+        'context_budget': 'unknown',
+        # detect_version always returns None — never guess offline
+        'version_detect': 'unsupported',
+        # spec_verified refreshed against docs.windsurf.com rules page
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.windsurf', '.windsurfrules']

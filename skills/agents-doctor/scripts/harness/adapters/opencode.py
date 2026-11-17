@@ -172,6 +172,48 @@ class OpencodeAdapter(HarnessAdapter):
         'modelled from the docs, not runtime-verified',
     ]
 
+    # --- conformance: how we know each capability (TZ 3.0 section 5).
+    # No runtime verification exists for this adapter, so 'runtime-tested'
+    # never appears; every entry cites where the knowledge comes from.
+    CAPABILITY_STATUS = {
+        # marker files (.opencode, opencode.json[c], AGENTS.md) and
+        # ~/.config/opencode are the documented discovery surface
+        'detection': 'documented',
+        # ~/.config/opencode/opencode.json + global AGENTS.md: documented
+        # locations, discovered and parsed by this adapter
+        'user_settings': 'documented',
+        # global -> project root -> `instruction` override -> nested
+        # layers follow the documented rules layout
+        'instruction_hierarchy': 'documented',
+        # precedence numbers (1/10/15, 10*(depth+1)) are this adapter's
+        # model of the documented merge order, not runtime-verified
+        'loading_order': 'approximated',
+        # OpenCode documents no @import-style indirection for AGENTS.md;
+        # there is nothing to parse, so none is modelled
+        'imports': 'unsupported',
+        # OpenCode instruction files carry no path-scoped glob rules;
+        # no glob engine is needed or implemented
+        'glob_matching': 'unsupported',
+        # subdir AGENTS.md loaded while the agent works inside that
+        # subtree: documented mechanism, discovered and resolved
+        'nested_instructions': 'documented',
+        # .opencode/command|agent|plugin are the documented locations;
+        # only the locations are exposed, no skill parsing
+        'skills': 'documented',
+        # the `mcp`/`mcpServers` keys are documented, but reading them
+        # rides the heuristic jsonc stripper (see known_limitations)
+        'mcp': 'approximated',
+        # permission model (bash/edit/write allow-ask-deny) per docs;
+        # checked by OPENCODE_PERMISSIONS_DANGEROUS
+        'permissions': 'documented',
+        # no instruction-size budget in the docs; budget stays None
+        'context_budget': 'unknown',
+        # detect_version always returns None — never guess offline
+        'version_detect': 'unsupported',
+        # spec_verified refreshed against opencode.ai/docs/config/
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.opencode', 'opencode.json', 'opencode.jsonc', 'AGENTS.md']

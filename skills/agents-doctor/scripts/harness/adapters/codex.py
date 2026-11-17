@@ -72,6 +72,51 @@ class CodexAdapter(HarnessAdapter):
         'project .codex/config.toml support varies by version',
     ]
 
+    # --- conformance (TZ 3.0 section 5): honesty status per capability.
+    # No runtime verification exists for this adapter, so
+    # 'runtime-tested' never appears: claims trace to the Codex docs
+    # (spec_source) or to a known_limitations entry.
+    CAPABILITY_STATUS = {
+        # .codex/, AGENTS.md and AGENTS.override.md are documented
+        # project artifacts; the engine just combines the markers
+        'detection': 'documented',
+        # ~/.codex/config.toml is the documented user config; only the
+        # project-level .codex/config.toml varies by version
+        # (known_limitations)
+        'user_settings': 'documented',
+        # global -> project -> override -> nested layering per docs;
+        # the override file is a documented mechanism
+        'instruction_hierarchy': 'documented',
+        # concat merge with nearer-to-target-wins per docs; modelled as
+        # documented, not runtime-verified (known_limitations)
+        'loading_order': 'documented',
+        # the AGENTS.md format defines no @import indirection, so none
+        # is modelled
+        'imports': 'unsupported',
+        # AGENTS.md has no path-scoped rules; nothing to model
+        'glob_matching': 'unsupported',
+        # modelled with a deviation: first-level subdir AGENTS.md are
+        # active even for the root target, deeper ones only on the
+        # root->target path — the runtime reads them lazily instead
+        'nested_instructions': 'approximated',
+        # only the shared .agents/skills dir is listed; native Codex
+        # skill discovery has not been verified against the docs
+        'skills': 'unknown',
+        # [mcp_servers.*] tables inside config.toml are documented
+        'mcp': 'documented',
+        # sandbox_mode / approval_policy semantics per docs
+        'permissions': 'documented',
+        # the 32768-byte chain budget is carried from the legacy scanner
+        # constant ("Codex truncation budget", docs/gates.md); not
+        # re-verified against the current official docs
+        'context_budget': 'approximated',
+        # sniffs ~/.codex/version and config.toml keys — a heuristic
+        # over state files, not a documented interface
+        'version_detect': 'approximated',
+        # spec_source re-verified on spec_verified (2026-11-17)
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.codex', 'AGENTS.md', 'AGENTS.override.md', '.agents']

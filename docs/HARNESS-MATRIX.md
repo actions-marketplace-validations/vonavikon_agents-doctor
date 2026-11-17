@@ -2,16 +2,35 @@
 
 Generated from the adapter registry by `python tools/gen_harness_matrix.py` — do not edit by hand.
 
-| harness | id | adapter ver | capabilities | spec verified | versions |
-|---|---|---|---|---|---|
-| Z Code | `zcode` | 1.0.0 | instructions, resolution, validation, skills, budget | 2026-11-17 | current CLI (version not detectable offline) |
-| Claude Code | `claude_code` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | 2.x (loading model, unverified against runtime) |
-| OpenAI Codex | `codex` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current CLI (unverified) |
-| Cursor | `cursor` | 1.0.0 | instructions, resolution, validation, version | 2026-11-17 | current (unverified) |
-| Gemini CLI | `gemini_cli` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| OpenCode | `opencode` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| GitHub Copilot | `github_copilot` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| Windsurf | `windsurf` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| harness | id | adapter ver | quality | capabilities | spec verified | versions |
+|---|---|---|---|---|---|---|
+| Z Code | `zcode` | 1.0.0 | 0.41 | instructions, resolution, validation, skills, budget | 2026-11-17 | current CLI (version not detectable offline) |
+| Claude Code | `claude_code` | 1.0.0 | 0.5 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | 2.x (loading model, unverified against runtime) |
+| OpenAI Codex | `codex` | 1.0.0 | 0.5 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current CLI (unverified) |
+| Cursor | `cursor` | 1.0.0 | 0.29 | instructions, resolution, validation, version | 2026-11-17 | current (unverified) |
+| Gemini CLI | `gemini_cli` | 1.0.0 | 0.47 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| OpenCode | `opencode` | 1.0.0 | 0.47 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| GitHub Copilot | `github_copilot` | 1.0.0 | 0.35 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| Windsurf | `windsurf` | 1.0.0 | 0.29 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+
+Quality score: mean evidence weight over the 13 conformance capabilities (runtime-tested 1.0, documented 0.75, approximated 0.4, unsupported 0, unknown 0) — see the table below and docs/capability-matrix.json. It grades how well WE know each harness, not how healthy a workspace is.
+
+## Capability statuses
+
+How each adapter knows what it claims, per capability (harness/base.py CAPABILITY_STATUS):
+
+| harness | detection | user_settings | instruction_hierarchy | loading_order | imports | glob_matching | nested_instructions | skills | mcp | permissions | context_budget | version_detect | spec_freshness |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Z Code | dt | dt | ap | ap | us | us | us | dt | dt | uk | dt | uk | dt |
+| Claude Code | dt | dt | ap | ap | ap | ap | ap | dt | dt | dt | us | us | dt |
+| OpenAI Codex | dt | dt | dt | dt | us | us | ap | uk | dt | dt | ap | ap | dt |
+| Cursor | dt | us | dt | ap | us | ap | us | us | dt | uk | uk | us | dt |
+| Gemini CLI | dt | dt | ap | dt | ap | us | dt | dt | dt | uk | uk | us | dt |
+| OpenCode | dt | dt | dt | ap | us | us | dt | dt | ap | dt | uk | us | dt |
+| GitHub Copilot | dt | uk | dt | ap | us | ap | us | dt | ap | us | ap | us | dt |
+| Windsurf | dt | us | dt | ap | us | ap | us | us | dt | us | uk | us | dt |
+
+Legend: **dt** documented (confirmed against official docs) · **rt** runtime-tested (verified on a real runtime) · **ap** approximated (approximate model, documented deviations) · **us** unsupported (deliberately not modelled) · **uk** unknown (not enough data). Machine-readable copy: docs/capability-matrix.json.
 
 ## Specification provenance and limitations
 

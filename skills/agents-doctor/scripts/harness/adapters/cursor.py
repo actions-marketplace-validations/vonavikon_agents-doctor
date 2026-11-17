@@ -212,6 +212,48 @@ class CursorAdapter(HarnessAdapter):
         'nested .mdc referencing not modelled',
     ]
 
+    # --- conformance (TZ 3.0 section 5): honesty status per capability.
+    # No runtime verification exists for this adapter, so
+    # 'runtime-tested' never appears: claims trace to the Cursor docs
+    # (spec_source) or to a known_limitations entry.
+    CAPABILITY_STATUS = {
+        # .cursor/ and .cursorrules are documented project artifacts
+        'detection': 'documented',
+        # global Cursor state lives in the app directory, not in a
+        # stable home path: home_markers is deliberately empty
+        'user_settings': 'unsupported',
+        # the always/auto/agent/manual classification plus the legacy
+        # file follows the documented frontmatter semantics
+        'instruction_hierarchy': 'documented',
+        # activation semantics per docs, but the precedence values
+        # (30/20/10) and the legacy-below-rules ordering are model
+        # decisions the docs do not spell out
+        'loading_order': 'approximated',
+        # nested .mdc referencing is not modelled (known_limitations)
+        'imports': 'unsupported',
+        # fnmatch + dir-prefix approximation (known_limitations)
+        'glob_matching': 'approximated',
+        # Cursor has no per-directory instruction files: scoping is
+        # glob-based only, so there is nothing to model here
+        'nested_instructions': 'unsupported',
+        # Cursor's rule system has no skills mechanism;
+        # skills_locations() stays empty
+        'skills': 'unsupported',
+        # .cursor/mcp.json with the mcpServers key is documented
+        'mcp': 'documented',
+        # no Cursor permission model knowledge has been collected;
+        # nothing implemented, not even an approximation
+        'permissions': 'unknown',
+        # no budget knowledge at all; not even listed in
+        # known_limitations
+        'context_budget': 'unknown',
+        # the app version is not discoverable offline from the project;
+        # detect_version never guesses
+        'version_detect': 'unsupported',
+        # spec_source re-verified on spec_verified (2026-11-17)
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.cursor', '.cursorrules']

@@ -145,6 +145,47 @@ class GeminiCliAdapter(HarnessAdapter):
         'code blocks are not excluded',
     ]
 
+    # --- conformance (TZ 3.0 section 5): honesty status per capability.
+    # No runtime verification exists for this adapter, so
+    # 'runtime-tested' never appears: claims trace to the Gemini CLI
+    # docs (spec_source) or to a known_limitations entry.
+    CAPABILITY_STATUS = {
+        # .gemini/, GEMINI.md and ~/.gemini are documented artifacts
+        'detection': 'documented',
+        # ~/.gemini/settings.json is the documented user config
+        'user_settings': 'documented',
+        # the GEMINI.md layers themselves are documented, but the
+        # hierarchical AI memories are an instruction source the adapter
+        # does not see (known_limitations)
+        'instruction_hierarchy': 'approximated',
+        # user/project/nested chain with closest-to-target-wins per
+        # docs; modelled as documented, not runtime-verified
+        'loading_order': 'documented',
+        # the 5-hop limit is documented, but token extraction is a
+        # regex that does not exclude fenced code blocks
+        # (known_limitations)
+        'imports': 'approximated',
+        # GEMINI.md files have no path-scoped rules; nothing to model
+        'glob_matching': 'unsupported',
+        # subtree GEMINI.md loaded while working inside it, per docs
+        'nested_instructions': 'documented',
+        # .gemini/extensions and .gemini/commands are documented
+        # locations
+        'skills': 'documented',
+        # mcpServers inside settings.json is documented
+        'mcp': 'documented',
+        # the sandbox/yolo approval mode is known to exist but no
+        # permission model has been collected or implemented
+        'permissions': 'unknown',
+        # no chain budget is documented for the instruction chain
+        # (module docstring); nothing to assert
+        'context_budget': 'unknown',
+        # no offline version source; detect_version never guesses
+        'version_detect': 'unsupported',
+        # spec_source re-verified on spec_verified (2026-11-17)
+        'spec_freshness': 'documented',
+    }
+
     # ------------------------------------------------- detection
     def project_markers(self, ctx: HarnessContext) -> list:
         return ['.gemini', 'GEMINI.md']
