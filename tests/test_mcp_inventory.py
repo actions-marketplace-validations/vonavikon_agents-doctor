@@ -68,7 +68,8 @@ class StdioInventoryTest(unittest.TestCase):
     def test_files_scanned_lists_config(self):
         root, home = _dot_mcp_json({'command': 'node server.js'})
         inv = collect_mcp_inventory(root, home)
-        self.assertIn(str(root / '.mcp.json'), inv['files_scanned'])
+        self.assertIn(str((root / '.mcp.json').resolve()),
+                    inv['files_scanned'])
 
     def test_transport_unknown_for_bare_definition(self):
         root, home = _dot_mcp_json({'description': 'no command, no url'})
@@ -141,7 +142,7 @@ class TomlInventoryTest(unittest.TestCase):
         inv = collect_mcp_inventory(root, home)
         srv = _by_name(inv, 'home-srv')
         self.assertIsNotNone(srv)
-        self.assertTrue(str(home / '.codex' / 'config.toml')
+        self.assertTrue(str((home / '.codex' / 'config.toml').resolve())
                         in inv['files_scanned'])
 
 

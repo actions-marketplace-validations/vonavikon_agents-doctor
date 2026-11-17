@@ -190,3 +190,102 @@ class RuntimeFlagTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WatchSubcommandTest(unittest.TestCase):
+    def _ws(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(base,
+                                                            ignore_errors=True))
+        ws = base / 'ws'
+        ws.mkdir()
+        return base, ws
+
+    def test_watch_passthrough(self):
+        import watch as watch_mod
+        base, ws = self._ws()
+        calls = {}
+        orig = watch_mod.watch
+        watch_mod.watch = lambda root, **kw: calls.update(kw) or 2
+        try:
+            rc = agents_doctor.main(['watch', str(ws), '--home', str(base),
+                                     '--interval', '5', '--once',
+                                     '--deep', '--db', 'x.db'])
+        finally:
+            watch_mod.watch = orig
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls['interval'], 5)
+        self.assertTrue(calls['once'])
+        self.assertTrue(calls['deep'])
+        self.assertEqual(calls['db'], 'x.db')
+
+    def test_watch_not_a_directory(self):
+        base, ws = self._ws()
+        rc = agents_doctor.main(['watch', str(base / 'nope')])
+        self.assertEqual(rc, 1)
+
+
+class PolicySubcommandTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.base,
+                                                            ignore_errors=True))
+        self.ws = self.base / 'ws'
+        self.ws.mkdir()
+        (self.ws / 'AGENTS.md').write_text('x\n', encoding='utf-8')
+        out = self.base / 'scan.json'
+        rc = agents_doctor.main(['audit', str(self.ws),
+                                 '--home', str(self.base),
+                                 '--out', str(out)])
+        self.assertEqual(rc, 0)
+        self.scan = out
+
+    def _policy(self, text='version: 1\npolicy:\n  name: t\n'):
+        p = self.base / 'p.yml'
+        p.write_text(text, encoding='utf-8')
+        return p
+
+    def test_policy_json_out_file(self):
+        out = self.base / 'rep.json'
+        rc = agents_doctor.main(['policy', str(self.scan),
+                                 '--policy', str(self._policy()),
+                                 '--out', str(out)])
+        self.assertEqual(rc, 0)
+        import json as j
+        data = j.loads(out.read_text(encoding='utf-8'))
+        self.assertIn('rules_evaluated', data)
+
+    def test_policy_markdown_format(self):
+        out = self.base / 'rep.md'
+        rc = agents_doctor.main(['policy', str(self.scan),
+                                 '--policy', str(self._policy()),
+                                 '--out', str(out), '--format', 'md'])
+        self.assertEqual(rc, 0)
+        text = out.read_text(encoding='utf-8')
+        self.assertIn('| Rule | Status |', text)
+
+    def test_policy_broken_yaml_fails(self):
+        p = self.base / 'broken.yml'
+        p.write_text('policy: [unclosed\n', encoding='utf-8')
+        rc = agents_doctor.main(['policy', str(self.scan),
+                                 '--policy', str(p)])
+        self.assertEqual(rc, 1)
+
+    def test_audit_policy_flag_embeds_report(self):
+        out = self.base / 'scan2.json'
+        rc = agents_doctor.main(['audit', str(self.ws),
+                                 '--home', str(self.base),
+                                 '--policy', str(self._policy()),
+                                 '--out', str(out)])
+        self.assertEqual(rc, 0)
+        import json as j
+        rep = j.loads(out.read_text(encoding='utf-8'))
+        self.assertIn('policy_report', rep)
+
+    def test_audit_policy_missing_file_errors(self):
+        out = self.base / 'scan3.json'
+        rc = agents_doctor.main(['audit', str(self.ws),
+                                 '--home', str(self.base),
+                                 '--policy', str(self.base / 'nope.yml'),
+                                 '--out', str(out)])
+        self.assertEqual(rc, 1)
