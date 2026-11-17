@@ -65,11 +65,27 @@ Both files stay in the audited root. Nothing else is written anywhere.
 
 ## What the plugin never does
 
-- Deletes, moves or edits anything. The scanner reads; the report ends
-  with commands you run yourself.
-- Sends data anywhere. No telemetry, no network access; the scanner works
-  offline.
-- Writes secret values. Detections carry a mask and a salted fingerprint
+- Deletes, moves or edits anything during an audit. The scanner reads; the
+  report ends with commands you run yourself. Cleanup is a separate,
+  explicit step with typed confirmation.
+- Makes network requests. The scanner, CLI reports, human-readable reports,
+  SARIF export and baseline comparison are fully local — zero HTTP calls,
+  zero telemetry, zero API keys required.
+- Writes secret values. Detections carry a mask and an HMAC fingerprint
   only; the value never enters the JSON, the report or the chat.
 - Follows symlinks out of the workspace. Links pointing outside the root
   are skipped and counted in `stats.skipped_symlinks_outside`.
+
+## Privacy: what the LLM sees
+
+If you run agents-doctor through an AI harness (Claude Code, Z Code), the
+model sees scan results as part of its context: file paths, gate statuses,
+findings, masked secret metadata. This is the same as any other skill or
+command. The scanner itself never sends data anywhere.
+
+To work fully offline without any LLM:
+```bash
+python skills/agents-doctor/scripts/audit_scan.py ./my-workspace --out scan.json
+python skills/agents-doctor/scripts/report_generator.py scan.json --out AUDIT.md
+python skills/agents-doctor/scripts/report_human.py scan.json --lang en
+```

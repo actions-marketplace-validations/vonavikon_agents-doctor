@@ -6,7 +6,27 @@
 
 **Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Works with Claude Code, Z Code, or standalone. Read-only by default; cleanup is explicit, recoverable, and never automatic.
 
-No telemetry. No network. Your data stays on your machine.
+## Privacy model
+
+**Scanner and CLI reports: fully local.** The scanner, Markdown reports, human-readable reports, SARIF export, and baseline comparison run entirely on your machine. No network requests, no API keys required, no telemetry.
+
+**LLM interpretation: depends on your AI harness.** If you use agents-doctor through Claude Code, Z Code, or another AI harness, the harness's language model sees the scan results (paths, gate statuses, findings, masked secret metadata) as part of its context. This is the same data the model would see from any skill or command you run. The scanner itself never sends data anywhere — the LLM sees only what your harness chooses to share.
+
+What the LLM can see from scan results:
+- file paths (relative to your workspace)
+- repository names and remote classifications
+- gate statuses and findings
+- masked secret metadata (kind, fingerprint — never the actual value)
+- configuration file names and parse status
+- skill names and health indicators
+
+What the LLM never sees:
+- actual secret values (redacted at source, before any output)
+- file contents (only metadata and findings)
+- your OS username (stripped from reports)
+- network traffic (scanner makes zero HTTP requests)
+
+**No-network verification:** run the scanner standalone with `--out scan.json` — use a network monitor to confirm zero outbound connections.
 
 ## How it works
 

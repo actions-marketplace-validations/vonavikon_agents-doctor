@@ -7,14 +7,42 @@ agents-doctor splits the job in two:
 1. A deterministic scanner. Pure Python stdlib, no dependencies, offline.
    It walks the workspace, collects facts and writes JSON. Runs are
    reproducible: the same tree produces the same findings.
-2. An LLM interpreter. The skill reads the JSON, filters false positives,
-   explains findings and writes the markdown report. The model judges
-   which facts are findings; it never collects facts itself.
+2. An LLM interpreter (optional). The skill reads the JSON, filters false
+   positives, explains findings and writes the markdown report. The model
+   judges which facts are findings; it never collects facts itself.
 
 This mirrors how production audit tools place the LLM strictly above
 ready findings rather than in the collection path (see
 [methodology.md](methodology.md)). Detection stays testable: the QA eval
 locks expected results and compares the scanner's actual JSON against them.
+
+## Data flow and privacy
+
+```
+WORKSPACE (files, git, configs)
+    │
+    ▼  reads only
+SCANNER (audit_scan.py)
+    │
+    ▼  writes one file
+scan.json (facts, redacted secrets, gates, findings)
+    │
+    ├──▶ Markdown report (report_generator.py)     ── local
+    ├──▶ Human report EN/RU (report_human.py)      ── local
+    ├──▶ SARIF (sarif.py)                          ── local
+    ├──▶ Baseline diff (--baseline)                ── local
+    │
+    └──▶ LLM via AI harness (skill)                ── depends on harness
+```
+
+The scanner, all report generators, SARIF export, and baseline comparison
+run entirely offline. Zero network requests, zero telemetry.
+
+When used through an AI harness (Claude Code, Z Code), the model sees the
+scan JSON as part of its context. Secret values are already redacted at
+this point — the model sees only masks, fingerprints, and metadata. What
+the harness does with this context is governed by the harness's own
+privacy policy, not by agents-doctor.
 
 ## Module map
 
