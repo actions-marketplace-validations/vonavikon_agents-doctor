@@ -8,3 +8,4 @@ bench/work/
 .coverage
 .coverage.*
 llm-eval/runs/
+tests/integration/run/

@@ -772,8 +772,11 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
         if path.is_file():
             try:
                 text = path.read_text(encoding='utf-8', errors='replace')
+                dead_refs = (e.get('dead_links', [])
+                             + e.get('dead_paths', [])
+                             + e.get('dead_commands', []))
                 rep['content_quality'][e['path']] = content_quality.analyze_content(
-                    text, e['path'])
+                    text, e['path'], dead_refs=dead_refs)
             except OSError:
                 pass
 

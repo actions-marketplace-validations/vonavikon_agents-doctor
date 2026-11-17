@@ -1,11 +1,48 @@
 # Configuration
 
-## No config file
+## Config file
 
-There is no configuration file and no environment variable to set. All
-runtime configuration is CLI flags, per invocation. The scanner sets the
-one environment variable it needs itself (`GIT_OPTIONAL_LOCKS=0` for every
-git call), so the audit cannot refresh or modify a git index.
+Runtime configuration is CLI flags, per invocation, plus one optional
+per-workspace file: `.agents-doctor.toml` in the workspace root. The
+scanner sets the one environment variable it needs itself
+(`GIT_OPTIONAL_LOCKS=0` for every git call), so the audit cannot refresh
+or modify a git index.
+
+The file supports three tables; every key is optional and the whole file
+is optional:
+
+```toml
+[exclude]
+directories = ["vendor", "scratch"]   # match any path segment, exact string
+files = ["legacy-notes.md"]           # match the relative path or bare name
+rules = ["DIR-002"]                   # finding ids to drop from the report
+
+[thresholds]
+max_file_mb = 5                       # tracked files at or over this fail G7
+junk_fail_gb = 0.5                    # junk volume that fails G9
+
+[report]
+lang = "en"                           # report language ("en" or "ru")
+```
+
+Behaviour of the file:
+
+- No file: built-in defaults, which equal the values above. Two audits of
+  the same tree give the same verdict.
+- Excluded paths are reported with the status `suppressed`, not `pass`:
+  a reader can tell "checked and clean" apart from "excluded by request".
+- Matching is exact-string, no globs. A directory matches when any single
+  path segment equals it; a file matches its workspace-relative path or
+  its bare name; a rule matches its finding id.
+- A file that does not parse, or parses to the wrong shapes (a string
+  where a number belongs, and so on), produces a warning and the defaults
+  apply whole: a broken config never half-applies.
+- Python 3.11+ parses the file with `tomllib`; on 3.9/3.10 a bundled
+  fallback parser covers the same format (section headers, full-line
+  `#` comments, booleans, numbers, quoted strings, flat arrays).
+
+The reader lives in `skills/agents-doctor/scripts/config.py`
+(`load_config(root)`); see the module docstring for the exact shapes.
 
 Optional Python packages change behaviour when present: PyYAML enables
 full frontmatter parsing (without it the flat fallback parser reports
@@ -56,14 +93,21 @@ A few scanner-side thresholds (memory index 24.4 KB / 200 lines, harness
 freshness 30/90 days, duplicate hash window 1-50 MB, heavy directory 1 MB)
 live as constants next to their checks in `audit_scan.py` and `enrich.py`.
 Changing any threshold is a code change with tests: see
-[contributing.md](contributing.md). There is deliberately no per-workspace
-override; two audits of the same tree must give the same verdict.
+[contributing.md](contributing.md). Two of them -- `max_file_mb`
+(`TRACKED_BIG_BYTES`) and `junk_fail_gb` (`JUNK_FAIL_BYTES`) -- can also be
+moved per workspace through `.agents-doctor.toml` (see above); every other
+threshold is deliberate code, so two audits of the same tree with the same
+config give the same verdict.
 
 ## Exclusions
 
 Build directories (never treated as content, size counted toward the junk
 total): `node_modules`, `__pycache__`, `.venv`, `venv`, `dist`, `build`,
 `target`, `.cache`, `.idea`, `.pytest_cache`.
+
+Workspace-requested exclusions (paths reported as `suppressed` rather than
+checked) come from the `[exclude]` table of `.agents-doctor.toml`; see the
+config file section above.
 
 Junk-name heuristics are bilingual (English and Russian) and match on file
 or directory names: temp, office lock files (`~$`), untitled, img_,

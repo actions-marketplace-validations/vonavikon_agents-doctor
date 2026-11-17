@@ -1,0 +1,8 @@
+{
+  "description": "Symlinks pointing outside the root guard a canary token; the scanner must skip them and never leak the token. Gate verdicts are covered by the unit suite on symlink-capable machines; this expectation locks the leak invariants.",
+  "requires_symlinks": true,
+  "counts": {"secrets": 0, "junk_files": 0, "junk_dirs": 0, "empty_dirs": 0, "duplicates": 0, "large_files": 0, "context_drift": 0, "dup_checkouts": 0},
+  "skipped_symlinks_min": 1,
+  "no_leak": ["sk-OUTSIDE-DEMO-0000000000"],
+  "findings_schema": true
+}

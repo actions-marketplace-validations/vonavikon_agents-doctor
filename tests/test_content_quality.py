@@ -183,6 +183,105 @@ class SpecificityTests(unittest.TestCase):
         self.assertEqual(cq.analyze_content('Just prose here.')['specificity'], 0.0)
 
 
+class VagueInstructionTests(unittest.TestCase):
+    def test_vague_directives_flagged(self):
+        text = '\n'.join([
+            'Be careful with security.',
+            'Handle errors properly.',
+            'Pay attention to performance.',
+        ])
+        report = cq.analyze_content(text)
+        self.assertEqual(report['vague_count'], 3)
+        self.assertEqual([v['line'] for v in report['vague_instructions']],
+                         [1, 2, 3])
+        texts = [v['text'] for v in report['vague_instructions']]
+        self.assertIn('Be careful with security.', texts)
+        self.assertIn('Handle errors properly.', texts)
+
+    def test_specific_directives_not_vague(self):
+        text = '\n'.join([
+            'Always run `npm test` before committing.',
+            'Check the logs in `build/out.log`.',
+            'Deploy via git push origin main.',
+            'Use `pip install -e .` for development.',
+        ])
+        report = cq.analyze_content(text)
+        self.assertEqual(report['vague_count'], 0)
+
+    def test_list_markers_stripped_prose_ignored(self):
+        text = '\n'.join([
+            '- Handle errors properly',        # list marker, still an order
+            'The team handles errors properly.',  # prose: no imperative lead
+            '# Handle errors properly',        # heading, not an instruction
+        ])
+        report = cq.analyze_content(text)
+        self.assertEqual(report['vague_count'], 1)
+        self.assertEqual(report['vague_instructions'][0]['line'], 1)
+
+    def test_existing_dimensions_untouched_by_vague_scan(self):
+        text = 'Be careful with security.\nAlways run `make test`.\n'
+        report = cq.analyze_content(text)
+        self.assertEqual(report['signal_lines'], 1)
+        self.assertEqual(report['generic_count'], 1)
+        self.assertEqual(report['vague_count'], 1)
+
+
+class ObsoleteHintTests(unittest.TestCase):
+    def test_dead_refs_flagged_with_lines(self):
+        text = '\n'.join([
+            'The style guide lives in [docs/guide.md](docs/guide.md).',
+            'Run `npm run test` before every push.',
+            'Config defaults are read at startup.',
+            'Also see docs/guide.md for details.',
+        ])
+        report = cq.analyze_content(
+            text, dead_refs=['docs/guide.md', 'npm run test'])
+        self.assertEqual(report['obsolete_count'], 3)
+        by_ref = {}
+        for hint in report['obsolete_hints']:
+            by_ref.setdefault(hint['ref'], []).append(hint['line'])
+        self.assertEqual(sorted(by_ref['docs/guide.md']), [1, 4])
+        self.assertEqual(by_ref['npm run test'], [2])
+
+    def test_no_dead_refs_means_no_hints(self):
+        text = 'The style guide lives in [docs/guide.md](docs/guide.md).'
+        report = cq.analyze_content(text)
+        self.assertEqual(report['obsolete_count'], 0)
+        self.assertEqual(report['obsolete_hints'], [])
+
+    def test_same_ref_twice_on_a_line_reported_once(self):
+        text = 'See [docs/guide.md](docs/guide.md) now.'
+        report = cq.analyze_content(text, dead_refs=['docs/guide.md'])
+        self.assertEqual(report['obsolete_count'], 1)
+        self.assertEqual(report['obsolete_hints'][0]['line'], 1)
+
+
+class OverlongInstructionTests(unittest.TestCase):
+    def test_line_over_200_chars_flagged(self):
+        short = 'Run `make test` before committing.'
+        long_line = 'Handle errors properly ' + 'and carefully ' * 15 + 'everywhere.'
+        self.assertGreater(len(long_line), cq.OVERLONG_LINE_CHARS)
+        text = short + '\n' + long_line + '\n' + short
+        report = cq.analyze_content(text)
+        self.assertEqual(report['overlong_count'], 1)
+        entry = report['overlong_lines'][0]
+        self.assertEqual(entry['line'], 2)
+        self.assertEqual(entry['length'], len(long_line))
+
+    def test_boundary_200_chars_not_flagged(self):
+        exact = 'Handle errors properly and a' * 10  # 300 chars -> trim to 200
+        exact = exact[:cq.OVERLONG_LINE_CHARS]
+        self.assertEqual(len(exact), cq.OVERLONG_LINE_CHARS)
+        report = cq.analyze_content(exact)
+        self.assertEqual(report['overlong_count'], 0)
+
+    def test_long_code_lines_inside_fences_ignored(self):
+        fence_body = 'x' * (cq.OVERLONG_LINE_CHARS + 40)
+        text = '```\n' + fence_body + '\n```\n'
+        report = cq.analyze_content(text)
+        self.assertEqual(report['overlong_count'], 0)
+
+
 # A synthetic AGENTS.md-like file, 14 lines of mixed quality: headings,
 # actionable rules with concrete references, generic filler, narrative.
 # 7 of 13 non-blank lines are signal -> ratio 0.538 -> verdict 'good'.

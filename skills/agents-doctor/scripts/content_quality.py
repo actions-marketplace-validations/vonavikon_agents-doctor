@@ -37,6 +37,7 @@ __all__ = ['analyze_content', 'quality_summary']
 REDUNDANT_SIMILARITY = 0.70   # word overlap at which two rules are duplicates
 CONTRADICTION_OVERLAP = 0.50  # word overlap at which two directives share a topic
 MAX_REDUNDANT_PAIRS = 5       # report cap; redundant_total keeps the real count
+OVERLONG_LINE_CHARS = 200     # instruction lines over this are hard to follow
 
 # Words with no discriminating power: dropped before all overlap math.
 # Without this, "run the tests before you commit" and "commit directly to main"
@@ -73,6 +74,18 @@ _GENERIC_RX = re.compile(
 # "never use spaces" yields only a negative directive, not a positive "use".
 _POSITIVE_RX = re.compile(r"(?i)\b(?:always|use|must|should|prefer)\s+(?!not\b)(.+)")
 _NEGATIVE_RX = re.compile(r"(?i)\b(?:must not|never|don'?t|do not|avoid)\s+(.+)")
+
+# Imperative lead for the vague-instruction scan: a directive verb opening
+# the sentence (after an optional softener). Broader than _IMPERATIVE_RX on
+# purpose: "handle errors properly" or "be careful with security" instruct
+# without containing any of the signal verbs, yet they are still orders.
+_IMPERATIVE_LEAD_RX = re.compile(
+    r"(?i)^(?:please\s+|always\s+|never\s+)?(?:"
+    r"don'?t|do not|use|must|should|avoid|prefer|run|execute|check|verify|"
+    r"ensure|be|handle|keep|make|write|follow|test|commit|document|review|"
+    r"update|add|remove|delete|create|install|configure|set|build|deploy|"
+    r"merge|push|pull|fix|refactor|improve|maintain|pay|treat|consider|"
+    r"remember|mind|watch)\b")
 
 # Concrete references: paths, commands, URLs, versions, tool names.
 _SPECIFIC_RX = re.compile(
@@ -258,14 +271,70 @@ def _contradictions(lines):
     return found
 
 
-def analyze_content(text, filepath=''):
+def _vague_scan(lines):
+    """Directives that order something the agent cannot act on: an
+    imperative verb opening the line plus an object with no path, no
+    command, no concrete file ("be careful with security", "handle errors
+    properly"). The object test is _is_specific on the whole core, so a
+    backticked command or a named path keeps the line out of this bucket.
+    Headings, code and fences are skipped; list markers are stripped."""
+    found = []
+    for entry in lines:
+        if entry['kind'] in ('blank', 'fence', 'code', 'heading', 'formatting'):
+            continue
+        core = _LIST_MARKER_RX.sub('', entry['raw'].strip()).strip()
+        if not core or not _IMPERATIVE_LEAD_RX.match(core):
+            continue
+        if _is_specific(core):
+            continue
+        found.append({'line': entry['num'], 'text': entry['raw'].strip()})
+    return found
+
+
+def _obsolete_scan(lines, dead_refs):
+    """Lines referencing files or commands the scanner proved absent from
+    the current workspace (dead paths, dead link targets, dead npm/make
+    targets). dead_refs comes from the caller's structural scan; each
+    (line, ref) pair is reported once, so a markdown link whose text and
+    target name the same dead file yields one record."""
+    found = []
+    for ref in dead_refs or []:
+        for entry in lines:
+            if entry['kind'] == 'blank':
+                continue
+            if ref in entry['raw']:
+                found.append({'line': entry['num'], 'ref': ref,
+                              'text': entry['raw'].strip()})
+    return found
+
+
+def _overlong_scan(lines):
+    """Instruction lines over OVERLONG_LINE_CHARS: too long to follow in
+    one pass, candidates for splitting. Code inside fences is data, not an
+    instruction, and is left alone."""
+    found = []
+    for entry in lines:
+        if entry['kind'] in ('blank', 'code'):
+            continue
+        if len(entry['raw']) > OVERLONG_LINE_CHARS:
+            found.append({'line': entry['num'], 'length': len(entry['raw'])})
+    return found
+
+
+def analyze_content(text, filepath='', dead_refs=None):
     """Pure content-quality analysis of one instruction file's raw text.
 
     Returns a report dict with one key per dimension:
     signal_ratio, generic_phrases/generic_count, instruction_density,
     redundant_pairs (capped at MAX_REDUNDANT_PAIRS) + redundant_total,
-    contradictions, specificity, and a staleness_hint placeholder the
-    caller fills from git history. No I/O, no exceptions on odd input.
+    contradictions, specificity, vague_instructions/vague_count,
+    obsolete_hints/obsolete_count, overlong_lines/overlong_count, and a
+    staleness_hint placeholder the caller fills from git history.
+
+    dead_refs lists files, link targets and commands the structural scan
+    proved absent from the current workspace; lines naming them are
+    reported as obsolete hints. None (the default) skips that dimension.
+    No I/O, no exceptions on odd input.
     """
     size_bytes = len(text.encode('utf-8'))
     lines = _classify(text)
@@ -286,6 +355,10 @@ def analyze_content(text, filepath=''):
     specific_count = sum(1 for l in signal_lines if _is_specific(l['raw']))
     specificity = (specific_count / len(signal_lines)) if signal_lines else 0.0
 
+    vague_instructions = _vague_scan(lines)
+    obsolete_hints = _obsolete_scan(lines, dead_refs)
+    overlong_lines = _overlong_scan(lines)
+
     return {
         'filepath': filepath,
         'size_bytes': size_bytes,
@@ -302,6 +375,12 @@ def analyze_content(text, filepath=''):
         'redundant_total': redundant_total,
         'contradictions': contradictions,
         'specificity': round(specificity, 3),
+        'vague_instructions': vague_instructions,
+        'vague_count': len(vague_instructions),
+        'obsolete_hints': obsolete_hints,
+        'obsolete_count': len(obsolete_hints),
+        'overlong_lines': overlong_lines,
+        'overlong_count': len(overlong_lines),
         'staleness_hint': {'computable': False,
                            'reason': 'requires git history'},
     }
@@ -386,6 +465,27 @@ def quality_summary(analysis):
 
     redundant = len(analysis.get('redundant_pairs', []))
     contradicted = len(analysis.get('contradictions', []))
+    vague_count = analysis.get('vague_count', 0)
+    obsolete_count = analysis.get('obsolete_count', 0)
+    overlong_count = analysis.get('overlong_count', 0)
+
+    def vague_word(value):
+        if value == 0:
+            return 'none detected'
+        if value < 3:
+            return 'a few: directives without an actionable object'
+        return 'many: orders the agent cannot act on'
+
+    def obsolete_word(value):
+        if value == 0:
+            return 'none detected'
+        return 'references files or commands absent from the workspace'
+
+    def overlong_word(value):
+        if value == 0:
+            return 'none detected'
+        return 'instruction lines over %d chars: split them' % OVERLONG_LINE_CHARS
+
     details = [
         ('signal_ratio', ratio, ratio_word(ratio)),
         ('generic_phrases', generic_count, generic_word(generic_count)),
@@ -398,5 +498,8 @@ def quality_summary(analysis):
         ('contradictions', contradicted,
          'none detected' if contradicted == 0
          else 'conflicting directives detected'),
+        ('vague_instructions', vague_count, vague_word(vague_count)),
+        ('obsolete_hints', obsolete_count, obsolete_word(obsolete_count)),
+        ('overlong_instructions', overlong_count, overlong_word(overlong_count)),
     ]
     return {'overall': overall, 'headline': headline, 'details': details}
