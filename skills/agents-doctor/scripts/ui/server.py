@@ -15,6 +15,18 @@ Safety rules (Visual TZ section 16):
 - read-only: no endpoint writes, moves or executes anything. The
   remediation preview endpoint plans fixes but never applies them.
 
+Request security (TZ v2.1.0, Local UI Security; threat model: hostile
+pages open in other tabs of the local browser):
+- DNS-rebinding defense: every request must carry Host 127.0.0.1[:port]
+  or localhost[:port] (exact port when present), else 403 + log;
+- CSRF defense on the mutating endpoint (POST /api/rescan): browsers
+  must send a local Origin/Referer and non-cross-site Sec-Fetch-Site;
+  Origin-less clients (curl) need --token mode or the explicit
+  'X-Agents-Doctor: local' header;
+- optional --token: /api/* then requires 'Authorization: Bearer <t>'
+  or '?token='; static files stay open (readable, not sensitive);
+- static responses carry a Content-Security-Policy and nosniff.
+
 API (all GET unless noted, JSON):
   /api/overview                      stats, gates, severity/status counts
   /api/harnesses                     detection + spec matrix
@@ -24,14 +36,17 @@ API (all GET unless noted, JSON):
   /api/file                          ?path=<rel>  masked text preview
   /api/simulate                      ?target=<rel> &harness=<id>
   /api/fixplan                       ?fid=<id> remediation plan (dry)
+  /api/mcp                           MCP server inventory (secret-free)
   /api/rescan              (POST)    rerun the scan in-process
 """
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import mimetypes
 import re
+import secrets
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +58,7 @@ SCRIPTS = UI_DIR.parent
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_scan          # noqa: E402  (in-process rescan)
+import mcp_inventory       # noqa: E402  (MCP server inventory)
 import secret_rules        # noqa: E402  (preview masking)
 import remediate           # noqa: E402  (dry-run plans only)
 
@@ -348,16 +364,90 @@ def api_compare(state: UiState, qs):
     }
 
 
-def make_handler(state: UiState):
+def api_mcp(state: UiState, _qs):
+    """MCP server inventory across detected harnesses. Secret-free by
+    construction: env variable names, command heads and url hosts only
+    (see mcp_inventory)."""
+    home = Path(state.report.get('home') or Path.home())
+    try:
+        return mcp_inventory.collect_mcp_inventory(state.root, home)
+    except Exception as exc:  # inventory must never kill the server
+        return {'error': 'mcp inventory failed: %s' % exc}
+
+
+def make_handler(state: UiState, token: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass  # quiet: the UI is a local tool
 
+        # ---------------------------------------- request security
+        def _security_log(self, why: str):
+            # log_message is silenced on purpose; security rejects are
+            # the one thing worth a stderr line
+            print('agents-doctor UI: rejected %s %s (%s)'
+                  % (self.command, self.path, why), file=sys.stderr)
+
+        def _port(self) -> int:
+            return self.server.server_address[1]
+
+        def _host_allowed(self) -> bool:
+            """DNS-rebinding defense: Host must be 127.0.0.1[:port] or
+            localhost[:port]; a foreign name or port is a rebound host."""
+            host = (self.headers.get('Host') or '').strip().lower()
+            return host in ('127.0.0.1', 'localhost',
+                            '127.0.0.1:%d' % self._port(),
+                            'localhost:%d' % self._port())
+
+        def _token_ok(self, qs) -> bool:
+            """--token mode check. Constant-time compare; accepts the
+            Authorization: Bearer header or ?token= (the latter only
+            for the one printed startup URL and quick curl checks)."""
+            if token is None:
+                return True
+            auth = self.headers.get('Authorization') or ''
+            supplied = auth[7:].strip() if auth[:7].lower() == 'bearer ' \
+                else ''
+            if not supplied:
+                supplied = (qs.get('token', [''])[0] or '').strip()
+            return bool(supplied) and hmac.compare_digest(supplied, token)
+
+        def _origin_allowed(self, value: str) -> bool:
+            try:
+                u = urlparse(value)
+                eff_port = u.port or (443 if u.scheme == 'https' else 80)
+            except ValueError:
+                return False
+            return (u.scheme == 'http'
+                    and (u.hostname or '').lower()
+                    in ('127.0.0.1', 'localhost')
+                    and eff_port == self._port())
+
+        def _csrf_allowed(self, token_mode: bool) -> bool:
+            """POST guard. Browsers send Origin/Referer and (modern
+            ones) Sec-Fetch-Site; a cross-site signal or a foreign
+            origin is rejected. Origin-less clients (curl) pass only
+            in --token mode or with the explicit opt-in header."""
+            sfs = (self.headers.get('Sec-Fetch-Site') or '').strip().lower()
+            if sfs == 'cross-site':
+                return False
+            origin = self.headers.get('Origin')
+            referer = self.headers.get('Referer')
+            if origin is None and referer is None:
+                return token_mode or \
+                    (self.headers.get('X-Agents-Doctor') or '').strip().lower()\
+                    == 'local'
+            for value in (origin, referer):
+                if value is not None and not self._origin_allowed(value):
+                    return False
+            return True
+
+        # ---------------------------------------- responses
         def _json(self, obj, code=200):
             body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
             self.send_response(code)
             self.send_header('Content-Type', 'application/json; '
                                              'charset=utf-8')
+            self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -378,6 +468,11 @@ def make_handler(state: UiState):
             self.send_header('Content-Type',
                              ctype + ('; charset=utf-8'
                                       if ctype.startswith('text/') else ''))
+            self.send_header('Content-Security-Policy',
+                             "default-src 'self'; "
+                             "style-src 'self' 'unsafe-inline'; "
+                             "img-src 'self' data:")
+            self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Length', str(len(blob)))
             self.end_headers()
             self.wfile.write(blob)
@@ -386,6 +481,15 @@ def make_handler(state: UiState):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             route = parsed.path
+            if not self._host_allowed():
+                self._security_log('bad Host %r'
+                                   % (self.headers.get('Host'),))
+                self._json({'error': 'forbidden Host header'}, 403)
+                return
+            if route.startswith('/api/') and not self._token_ok(qs):
+                self._security_log('missing/invalid token')
+                self._json({'error': 'unauthorized: token required'}, 401)
+                return
             try:
                 if route in ('/', '/index.html'):
                     self._static('index.html')
@@ -413,6 +517,8 @@ def make_handler(state: UiState):
                     self._json(api_fixplan(state, qs))
                 elif route == '/api/compare':
                     self._json(api_compare(state, qs))
+                elif route == '/api/mcp':
+                    self._json(api_mcp(state, qs))
                 else:
                     self._json({'error': 'no such route'}, 404)
             except BrokenPipeError:
@@ -421,7 +527,24 @@ def make_handler(state: UiState):
                 self._json({'error': 'internal: %s' % exc}, 500)
 
         def do_POST(self):
-            if urlparse(self.path).path == '/api/rescan':
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            if not self._host_allowed():
+                self._security_log('bad Host %r'
+                                   % (self.headers.get('Host'),))
+                self._json({'error': 'forbidden Host header'}, 403)
+                return
+            if parsed.path == '/api/rescan':
+                if not self._token_ok(qs):
+                    self._security_log('missing/invalid token')
+                    self._json({'error': 'unauthorized: token required'},
+                               401)
+                    return
+                if not self._csrf_allowed(token is not None):
+                    self._security_log('cross-site or foreign origin')
+                    self._json({'error': 'cross-site request rejected'},
+                               403)
+                    return
                 try:
                     rep = audit_scan.scan(state.root,
                                           Path(state.report.get('home')
@@ -460,6 +583,9 @@ def main(argv=None):
     ap.add_argument('--baseline', default=None, metavar='OLD.json',
                     help='older scan.json: enables the Compare tab')
     ap.add_argument('--port', type=int, default=8765)
+    ap.add_argument('--token', action='store_true',
+                    help='require a bearer token for /api/* (token is '
+                         'generated and printed once at startup)')
     ap.add_argument('--no-open', action='store_true')
     a = ap.parse_args(argv)
     report, root = load_or_scan(a.scan, a.root, a.home)
@@ -472,8 +598,14 @@ def main(argv=None):
             print('warning: baseline unreadable (%s); compare disabled'
                   % exc, file=sys.stderr)
     state = UiState(report, root, baseline)
-    httpd = ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(state))
+    api_token = secrets.token_hex(32) if a.token else None
+    httpd = ThreadingHTTPServer(('127.0.0.1', a.port),
+                                make_handler(state, api_token))
     url = 'http://127.0.0.1:%d/' % a.port
+    if api_token:
+        # printed exactly once; the query form lets the SPA boot without
+        # retyping, later calls use the Authorization header
+        url += '?token=' + api_token
     print('agents-doctor UI: %s  (root: %s)  Ctrl+C to stop'
           % (url, state.root))
     if not a.no_open:

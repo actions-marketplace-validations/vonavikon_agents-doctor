@@ -51,6 +51,7 @@ def build_matrix() -> str:
         rows.append({
             'id': adapter.harness_id,
             'name': adapter.display_name,
+            'adapter_version': getattr(adapter, 'adapter_version', '-'),
             'source': adapter.spec_source or '(unset)',
             'verified': adapter.spec_verified or '(unset)',
             'versions': adapter.supported_versions or '(unverified)',
@@ -63,14 +64,14 @@ def build_matrix() -> str:
                  '`python tools/gen_harness_matrix.py` — do not edit '
                  'by hand.')
     lines.append('')
-    lines.append('| harness | id | capabilities | spec verified | '
-                 'versions |')
-    lines.append('|---|---|---|---|---|')
+    lines.append('| harness | id | adapter ver | capabilities | '
+                 'spec verified | versions |')
+    lines.append('|---|---|---|---|---|---|')
     for r in rows:
         caps = ', '.join(r['caps']) if r['caps'] else 'detection only'
-        lines.append('| %s | `%s` | %s | %s | %s |'
-                     % (r['name'], r['id'], caps, r['verified'],
-                        r['versions']))
+        lines.append('| %s | `%s` | %s | %s | %s | %s |'
+                     % (r['name'], r['id'], r['adapter_version'], caps,
+                        r['verified'], r['versions']))
     lines.append('')
     lines.append('## Specification provenance and limitations')
     lines.append('')

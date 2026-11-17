@@ -1,0 +1,17 @@
+# Hook definitions for the pre-commit framework (https://pre-commit.com).
+#
+# The entry resolves agents_doctor.py relative to the repository root
+# the hook runs in (language: system runs from the repo being
+# committed). The scan report is parked under .git so the hook never
+# dirties the worktree it is guarding.
+#
+# Standalone bash twins (no framework) and CI recipes live in
+# docs/ci-integration.md.
+
+- id: agents-doctor-audit
+  name: agents-doctor workspace audit
+  description: Fast workspace audit before every commit; blocks on critical findings with status fail.
+  entry: bash -c 'python skills/agents-doctor/scripts/agents_doctor.py audit . --fail-on critical --out "$PWD/.git/agents-doctor-scan.json"'
+  language: system
+  pass_filenames: false
+  always_run: true

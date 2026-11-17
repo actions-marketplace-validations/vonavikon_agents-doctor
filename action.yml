@@ -1,0 +1,110 @@
+# Composite GitHub Action: run an agents-doctor audit inside a job.
+#
+# Usage (after your own checkout step - this action does not check out
+# anything itself):
+#
+#   - uses: actions/checkout@v4
+#   - uses: vonavikon/agents-doctor@v2.1.0
+#     with:
+#       path: '.'
+#       fail-on: critical
+#       sarif: 'true'
+#
+# Files produced in $GITHUB_WORKSPACE:
+#   agents-doctor-scan.json   - the full scan report
+#   agents-doctor.sarif       - SARIF 2.1.0 export (inputs.sarif)
+#   agents-doctor-policy.json - policy compliance report (inputs.policy)
+#
+# See docs/ci-integration.md for GitLab CI, Jenkins, pre-commit and the
+# exit-code contract.
+
+name: 'agents-doctor audit'
+description: 'Audit an AI agent workspace: AGENTS.md health, secrets, policies'
+
+inputs:
+  path:
+    description: 'Workspace path'
+    default: '.'
+  fail-on:
+    description: 'Fail the job at this severity or higher (none|critical|high|medium|low|info)'
+    default: 'critical'
+  policy:
+    description: 'Path to a policy YAML (optional; evaluated by the policy subcommand, see docs/policies.md)'
+    required: false
+    default: ''
+  deep:
+    description: 'Scan git history for secrets'
+    default: 'false'
+  sarif:
+    description: 'Also write agents-doctor.sarif'
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Look for python
+      id: py
+      shell: bash
+      run: |
+        if command -v python >/dev/null 2>&1; then
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+        else
+          echo 'available=false' >> "$GITHUB_OUTPUT"
+        fi
+
+    # ubuntu-latest runners ship python; install it only when missing
+    - name: Install python 3.10
+      if: steps.py.outputs.available == 'false'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # inputs ride through env, never through inline interpolation
+    - name: Run agents-doctor audit
+      shell: bash
+      env:
+        DOCTOR: ${{ github.action_path }}/skills/agents-doctor/scripts/agents_doctor.py
+        WS_PATH: ${{ inputs.path }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        DEEP: ${{ inputs.deep }}
+        SCAN: ${{ github.workspace }}/agents-doctor-scan.json
+      run: |
+        args=(audit "$WS_PATH" --fail-on "$FAIL_ON" --out "$SCAN")
+        if [ "$DEEP" = 'true' ]; then
+          args+=(--deep)
+        fi
+        python "$DOCTOR" "${args[@]}"
+
+    # !cancelled(): the SARIF is worth uploading exactly when the audit
+    # found something, i.e. when the step above failed the job
+    - name: Export SARIF
+      if: ${{ !cancelled() && inputs.sarif == 'true' }}
+      shell: bash
+      env:
+        DOCTOR: ${{ github.action_path }}/skills/agents-doctor/scripts/agents_doctor.py
+        SCAN: ${{ github.workspace }}/agents-doctor-scan.json
+        SARIF: ${{ github.workspace }}/agents-doctor.sarif
+      run: |
+        if [ ! -f "$SCAN" ]; then
+          echo "agents-doctor: no scan report at $SCAN; SARIF export skipped"
+          exit 0
+        fi
+        python "$DOCTOR" sarif "$SCAN" --out "$SARIF"
+
+    # the policy subcommand exits 0 once its report is written; whether
+    # a violation blocks anything is a decision inside the policy file
+    # (docs/policies.md), not this step
+    - name: Evaluate policies
+      if: ${{ !cancelled() && inputs.policy != '' }}
+      shell: bash
+      env:
+        DOCTOR: ${{ github.action_path }}/skills/agents-doctor/scripts/agents_doctor.py
+        SCAN: ${{ github.workspace }}/agents-doctor-scan.json
+        POLICY: ${{ inputs.policy }}
+        OUT: ${{ github.workspace }}/agents-doctor-policy.json
+      run: |
+        if [ ! -f "$SCAN" ]; then
+          echo "agents-doctor: no scan report at $SCAN; policy evaluation skipped"
+          exit 0
+        fi
+        python "$DOCTOR" policy "$SCAN" --policy "$POLICY" --out "$OUT"

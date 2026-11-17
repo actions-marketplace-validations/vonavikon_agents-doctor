@@ -35,6 +35,7 @@ python skills/agents-doctor/scripts/agents_doctor.py audit <path>
     [--focus security|structure|agents]
     [--deep] [--home <dir>] [--baseline <prev.json>]
     [--out scan.json] [--report AUDIT.md] [--runtime]
+    [--fail-on critical|high|medium|low|info] [--policy FILE.yml]
 ```
 
 Runs the scan in-process, writes scan.json, optionally writes a markdown
@@ -46,6 +47,11 @@ with a previous scan. `--deep` also scans git history for secrets.
 presence, CLI binaries of detected harnesses (`--version`,
 timeout-bounded), static MCP config validation; zero network requests;
 the result lands in the `runtime` section of the report.
+`--fail-on SEV` (default none — the 2.0.0 exit contract is preserved)
+exits 1 after the report is written when findings at or above the
+severity have status fail. `--policy f.yml` evaluates policy files and
+embeds the compliance report into the scan JSON (`policy_report`). CI
+recipes: [ci-integration.md](ci-integration.md).
 
 The audit includes the harness registry stage: detection of every
 registered environment (Z Code, Claude Code, Codex, Cursor, Gemini CLI,
@@ -77,6 +83,41 @@ per-directory problem counts, findings explorer, masked file inspector,
 TreeMap (density/risk/size), instruction simulation and scan comparison.
 `--baseline` enables the Compare tab. The UI is read-only; fixes are
 planned (dry run) and applied only via the CLI.
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py policy <scan.json>
+    [--policy FILE.yml] [--out report.json] [--format json|md]
+```
+
+Evaluates corporate policy YAML file(s) against a finished scan and
+writes a compliance report. Without `--policy`, policy packs are
+discovered in installed plugins (`policies/*.yml`) and workspace-level
+`.agents-doctor.toml` `[policy] files`. Exit 0 after writing (gating
+lives in `audit --fail-on` / CI); exit 1 on an unreadable or invalid
+policy file. See [policies.md](policies.md).
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py history <root>
+    [--last N | --record scan.json | --diff OLD NEW |
+     --regressions | --trend | --prune N] [--db PATH] [--out FILE]
+```
+
+Local audit history (root-local SQLite, survives restarts): listing,
+fingerprint diffs between recorded scans, regression detection
+(severity up or pass/warn→fail), CSV trend, retention. Every full
+audit records automatically; secret values never enter the database.
+See [history.md](history.md).
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py watch <root>
+    [--interval 10] [--once] [--deep] [--db PATH] [--home <dir>]
+```
+
+Continuous monitoring: a configuration fingerprint (instruction and
+config files) is polled; on change a full scan re-runs, only NEW
+findings print, and the run lands in the history. `--once` is the
+daemon-free mode for cron: it rescans only when the fingerprint
+stored in `.agents-doctor/watch-state.json` changed.
 
 ```
 python skills/agents-doctor/scripts/agents_doctor.py sarif <scan.json>

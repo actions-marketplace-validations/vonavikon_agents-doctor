@@ -4,7 +4,7 @@
   <img src="docs/logo.png" alt="agents-doctor logo" width="120" height="120">
 </p>
 
-**Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Understands eight harnesses (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot, Windsurf, Z Code), simulates which instructions actually load, detects conflicts between them, and ships a local visual explorer. Works standalone or through your agent. Read-only by default; cleanup is explicit, recoverable, and never automatic.
+**Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Understands eight harnesses (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot, Windsurf, Z Code), simulates which instructions actually load, detects conflicts between them, ships a local visual explorer — and since 2.1 enforces YAML security policies, keeps a local audit history, watches configuration changes and gates CI. Works standalone or through your agent. Read-only by default; cleanup is explicit, recoverable, and never automatic.
 
 ## Privacy model
 
@@ -42,6 +42,13 @@ Inside the deterministic layer:
 - **Local web UI** — `agents_doctor.py ui` opens a visual explorer on 127.0.0.1: overview, lazy file tree with per-directory problem counts, findings table, masked file previews, TreeMap, instruction simulation and scan comparison. Read-only; fixes are planned there and applied only via the CLI.
 
 The scanner only reads. Deletions and edits always stay with the human.
+
+Since 2.1 there are four more planes, all optional and all offline:
+
+- **Policy engine** — corporate YAML policies (secrets, MCP allowlists, required instructions, dangerous permissions, banned content patterns) evaluated deterministically over a finished scan. Policy packs distribute through installed plugins; team/local files layer on top; exceptions carry a written reason. [Policies](docs/policies.md).
+- **Audit history** — every audit lands in a root-local SQLite database: trends, diffs between any two scans, regression detection (severity up or pass→fail). [History](docs/history.md).
+- **Continuous monitoring** — `watch` re-audits when the configuration fingerprint changes (polling, `--once` for cron); new findings print, history accumulates.
+- **CI gating** — `audit --fail-on critical` exits 1 at/above the threshold; a ready-made [GitHub Action](docs/ci-integration.md), pre-commit hooks and GitLab/Jenkins recipes.
 
 ## Security model
 
@@ -159,7 +166,7 @@ Remediation is a separate, never-automatic mode (`remediate.py`): it plans a fix
 
 ## Documentation
 
-[Quick start](docs/quickstart.md) · [Architecture](docs/architecture.md) · [Gates methodology](docs/gates.md) · [Configuration and exclusions](docs/configuration.md) · [CLI reference](docs/cli.md) · [Harness support matrix](docs/HARNESS-MATRIX.md) · [Adapter development guide](docs/ADAPTER-GUIDE.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](docs/contributing.md) · [Changelog](CHANGELOG.md) · [Release process](RELEASE.md) · [Report JSON schema](docs/schema/report-schema.json)
+[Quick start](docs/quickstart.md) · [Architecture](docs/architecture.md) · [Gates methodology](docs/gates.md) · [Configuration and exclusions](docs/configuration.md) · [Policies](docs/policies.md) · [Audit history](docs/history.md) · [CI integration](docs/ci-integration.md) · [CLI reference](docs/cli.md) · [Harness support matrix](docs/HARNESS-MATRIX.md) · [Adapter development guide](docs/ADAPTER-GUIDE.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](docs/contributing.md) · [Changelog](CHANGELOG.md) · [Release process](RELEASE.md) · [Report JSON schema](docs/schema/report-schema.json)
 
 ## QA
 

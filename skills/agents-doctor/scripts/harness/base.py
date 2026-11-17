@@ -164,6 +164,9 @@ class HarnessAdapter:
 
     harness_id: str = ''            # 'claude_code'
     display_name: str = ''          # 'Claude Code'
+    # adapter version, independent of the product version (TZ module 9):
+    # bump only when THIS adapter's behaviour or checks change
+    adapter_version: str = '1.0.0'
     # --- spec provenance (TZ 3.8): keep honest, update when re-verified
     spec_source: str = ''           # URL of the official documentation
     spec_verified: str = ''         # 'YYYY-MM-DD' of the last check
@@ -236,6 +239,7 @@ class HarnessAdapter:
         return {
             'harness_id': self.harness_id,
             'display_name': self.display_name,
+            'adapter_version': self.adapter_version,
             'spec_source': self.spec_source,
             'spec_verified': self.spec_verified,
             'supported_versions': self.supported_versions,

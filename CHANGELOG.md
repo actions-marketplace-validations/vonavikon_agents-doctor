@@ -4,6 +4,86 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [2.1.0] - 2026-11-17
+
+Security & quality foundation (TZ v2.1 stage 1): policy engine, audit
+history, continuous monitoring, CI/CD integration, security hardening.
+Backward compatible: audit without new flags behaves exactly as 2.0.0.
+
+### Policy Engine (TZ module 2)
+
+- policies.py: YAML corporate policies without dependencies (PyYAML
+  optional, bundled fallback parser); domains: secrets, mcp.allowlist,
+  instructions.require_agents_md, git.prevent_secret_commits,
+  permissions.forbid_wildcard, content.ban_patterns + custom_rules.
+- Deterministic evaluation over a finished scan + filesystem; levels
+  info/warning/error/critical mapped to finding severities; every
+  violation carries a stable rule id (POL-*), evidence and message;
+  missing fact sections read as unknown, never pass.
+- Layering: later files override per domain (severity conflict ->
+  strictest wins + warning); exceptions via .agents-doctor.toml
+  [policy] exceptions (rule id -> reason; a reasonless exception
+  warns); broken YAML never partially applies.
+- Distribution: `policy` subcommand discovers policy packs in
+  installed plugins (policies/*.yml under ~/.claude/plugins,
+  ~/.zcode/cli/plugins/cache, ~/.agents/plugins, plus the
+  AGENTS_DOCTOR_POLICY_PACKS directory) and workspace-level
+  [policy] files; `audit --policy f.yml` embeds the compliance
+  report into the scan JSON. docs/policies.md.
+
+### Audit history (TZ module 7, local part)
+
+- audit_history.py: root-local SQLite (<root>/.agents-doctor/
+  history.db) with linear migrations; every full audit auto-records
+  (failures never kill the audit); fingerprints and typed metadata
+  only — no secret values, no file contents (canary-tested).
+- `history` subcommand: list, --record, --diff (reuses the
+  fingerprint diff), --regressions (severity up or pass/warn->fail),
+  --trend CSV, --prune retention. docs/history.md.
+
+### Continuous monitoring (TZ module 1)
+
+- watch.py: configuration fingerprint (instruction/config files,
+  mtime+size) polled every --interval; on change a full scan re-runs
+  (fast and reproducible) and only NEW findings are printed; every
+  run lands in the history. `--once` is the daemon-free mode for
+  cron (rescan only when the stored fingerprint changed).
+
+### CI/CD integration (TZ module 8)
+
+- audit --fail-on critical|high|medium|low|info: exit 1 after the
+  report is written when findings at/above the threshold have status
+  fail; default none keeps the 2.0.0 contract (tested).
+- Composite GitHub Action (action.yml) with path/fail-on/deep/sarif/
+  policy inputs; .pre-commit-hooks.yaml + standalone scripts/hooks/
+  pre-commit.sh / pre-push.sh; docs/ci-integration.md (GitHub, GitLab,
+  Jenkins, hooks, exit codes).
+- Our own CI now dogfoods: the self-audit job runs agents-doctor on
+  this repository and uploads the SARIF artifact.
+
+### Security hardening (TZ module 3)
+
+- Local UI: Host-header allowlist (DNS-rebinding defense), Origin/
+  Referer + Sec-Fetch-Site checks on the mutating endpoint (strict
+  by default; curl via X-Agents-Doctor: local), optional --token
+  bearer auth for all /api routes, CSP + nosniff on static.
+- mcp_inventory.py: MCP servers across detected harnesses (names,
+  transports, two-token command heads, env KEY NAMES only — values
+  never enter by construction, canary-tested); suspicious-command
+  heuristic flagged as non-verdict; /api/mcp endpoint; embedded into
+  every scan (rep['mcp_inventory']).
+
+### Adapter framework (TZ module 9)
+
+- adapter_version field, independent of the product version; shown
+  in the generated Harness Support Matrix.
+
+### Tests
+
+796 -> 963 (policies 60, audit_history 43, ui security 22,
+mcp_inventory 19, watch 9, ci flags 14). QA eval 267 PASS;
+secret-quality floors PASS.
+
 ## [2.0.0] - 2026-11-17
 
 Universal AI-agent workspace auditor: harness intelligence, instruction

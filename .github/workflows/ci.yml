@@ -87,6 +87,31 @@ jobs:
           name: secret-quality-report
           path: bench/SECRET-QUALITY-ci.md
 
+  self-audit:
+    # dogfooding: agents-doctor audits its own repository. Report-only:
+    # the repo legitimately contains a synthetic secret corpus in
+    # tests/, so there is no --fail-on gate here; the SARIF artifact
+    # shows what a consumer would see.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: audit this repository
+        run: |
+          python skills/agents-doctor/scripts/agents_doctor.py audit . \
+            --home "$HOME" --out self-scan.json
+          python skills/agents-doctor/scripts/agents_doctor.py sarif \
+            self-scan.json --out agents-doctor.sarif
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: self-audit-sarif
+          path: |
+            agents-doctor.sarif
+            self-scan.json
+          path: bench/SECRET-QUALITY-ci.md
+
   llm-eval-offline:
     runs-on: ubuntu-latest
     steps:

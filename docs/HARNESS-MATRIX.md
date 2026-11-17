@@ -2,16 +2,16 @@
 
 Generated from the adapter registry by `python tools/gen_harness_matrix.py` — do not edit by hand.
 
-| harness | id | capabilities | spec verified | versions |
-|---|---|---|---|---|
-| Z Code | `zcode` | instructions, resolution, validation, skills, budget | 2026-11-17 | current CLI (version not detectable offline) |
-| Claude Code | `claude_code` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | 2.x (loading model, unverified against runtime) |
-| OpenAI Codex | `codex` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current CLI (unverified) |
-| Cursor | `cursor` | instructions, resolution, validation, version | 2026-11-17 | current (unverified) |
-| Gemini CLI | `gemini_cli` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| OpenCode | `opencode` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| GitHub Copilot | `github_copilot` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
-| Windsurf | `windsurf` | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| harness | id | adapter ver | capabilities | spec verified | versions |
+|---|---|---|---|---|---|
+| Z Code | `zcode` | 1.0.0 | instructions, resolution, validation, skills, budget | 2026-11-17 | current CLI (version not detectable offline) |
+| Claude Code | `claude_code` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | 2.x (loading model, unverified against runtime) |
+| OpenAI Codex | `codex` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current CLI (unverified) |
+| Cursor | `cursor` | 1.0.0 | instructions, resolution, validation, version | 2026-11-17 | current (unverified) |
+| Gemini CLI | `gemini_cli` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| OpenCode | `opencode` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| GitHub Copilot | `github_copilot` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
+| Windsurf | `windsurf` | 1.0.0 | instructions, resolution, validation, version, skills, budget | 2026-11-17 | current (unverified) |
 
 ## Specification provenance and limitations
 

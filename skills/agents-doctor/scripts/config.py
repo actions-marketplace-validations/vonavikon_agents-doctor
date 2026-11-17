@@ -54,6 +54,9 @@ DEFAULTS = {
     # explicit opt-in external adapters (TZ 17): paths to python
     # modules; never auto-discovered
     'plugins': {'adapters': []},
+    # policy engine (v2.1): rule-id exceptions with reasons; the
+    # policy files themselves come from --policy / policy packs
+    'policy': {'exceptions': {}, 'files': []},
 }
 
 try:
@@ -171,6 +174,18 @@ def _validate(data):
     adapters = plugins.get('adapters', [])
     if not isinstance(adapters, list) or not all(isinstance(v, str) for v in adapters):
         problems.append('plugins.adapters must be a list of strings')
+    policy = data.get('policy', {})
+    if not isinstance(policy, dict):
+        return "'policy' must be a table"
+    exceptions = policy.get('exceptions', {})
+    if not isinstance(exceptions, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in exceptions.items()):
+        problems.append('policy.exceptions must be a map of rule id -> '
+                        'reason string')
+    files = policy.get('files', [])
+    if not isinstance(files, list) or not all(isinstance(v, str) for v in files):
+        problems.append('policy.files must be a list of strings')
     return '; '.join(problems) or None
 
 
@@ -186,6 +201,9 @@ def _merge(data):
     for key, value in data.get('report', {}).items():
         if key in merged['report']:
             merged['report'][key] = value
+    for key, value in data.get('policy', {}).items():
+        if key in merged['policy']:
+            merged['policy'][key] = copy.deepcopy(value)
     return merged
 
 

@@ -46,7 +46,7 @@ MEMORY_LIMIT = 24985             # memory index load limit (24.4 KB)
 MEMORY_LINE_LIMIT = 200          # memory loads up to 200 lines or 25 KB, whichever comes first
 CHAIN_BUDGET = 32768             # Codex budget for the root + nested AGENTS.md chain
 SKILL_DESC_LIMIT = 1024          # Z Code skill description limit
-RULES_VERSION = '2.0.0'          # rule set version, goes into the report
+RULES_VERSION = '2.1.0'          # rule set version, goes into the report
 HARNESS_STALE_DAYS = 90          # older: harness counts as abandoned
 HARNESS_FRESH_DAYS = 30          # newer: active
 
@@ -859,6 +859,16 @@ def scan(root, home, deep=False, history_depth=None, history_all_refs=False,
         rep.setdefault('harness_spec_matrix', [])
         rep.setdefault('instruction_conflict_summary', {})
         rep.setdefault('harness_findings_raw', [])
+    # MCP inventory (v2.1 security hardening): server names and
+    # transports only — env values and full commands never enter the
+    # report by construction (see mcp_inventory.py)
+    try:
+        import mcp_inventory
+        rep['mcp_inventory'] = mcp_inventory.collect_mcp_inventory(
+            root, home)
+    except Exception:
+        rep['mcp_inventory'] = {'servers': [], 'files_scanned': [],
+                                'parse_errors': []}
 
     prof['enrich'] = time.monotonic() - _tp; _tp = time.monotonic()
     rep['findings'] = collect_findings(rep)

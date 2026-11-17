@@ -9,3 +9,4 @@ bench/work/
 .coverage.*
 llm-eval/runs/
 tests/integration/run/
+.agents-doctor/

@@ -14,18 +14,27 @@ Subcommands:
   fix <scan.json> <fid>          plan a fix; with --apply run it after
                                  an interactive confirmation (delegates
                                  to remediate.py)
+  history <root> [options]       local audit history in SQLite: listing,
+                                 --record, --diff, --regressions, --trend,
+                                 --prune (see audit_history.py)
+  policy <scan.json> --policy F  evaluate corporate policies against a
+                                 finished scan (see policies.py)
 
-Exit codes: 0 ok (compare always exits 0), 1 usage/IO error,
-2 explain: finding not found, 3 fix: no supported automatic fix.
+Exit codes: 0 ok (compare always exits 0; policy exits 0 once the
+report is written -- CI blocking is a policy flag, not an exit code),
+1 usage/IO error, 2 explain: finding not found, 3 fix: no supported
+automatic fix.
 """
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import audit_scan  # noqa: E402  (in-process scanner)
+import audit_scan    # noqa: E402  (in-process scanner)
+import audit_history  # noqa: E402  (root-local SQLite audit history)
 import remediate   # noqa: E402  (fix engine + fingerprint diff)
 
 PROG = 'agents_doctor'
@@ -44,6 +53,16 @@ FOCUS_SPECS = {
     'structure': {'gates': ['G1', 'G4', 'G9']},
     'agents': {'gates': ['G2', 'G3', 'G5', 'G8']},
 }
+
+# severity order for audit --fail-on: a finding trips the threshold when
+# its severity ranks at or above the requested level AND its status is
+# 'fail'. 'none' (the default) keeps the historical behavior — exit 0
+# even with critical failures; reports stay advisory unless a CI caller
+# explicitly opts in. A severity outside this list ranks below info and
+# never trips any threshold.
+SEVERITY_ORDER = ['info', 'low', 'medium', 'high', 'critical']
+SEVERITY_RANK = {name: rank for rank, name in enumerate(SEVERITY_ORDER)}
+FAIL_ON_CHOICES = ['none'] + SEVERITY_ORDER[::-1]
 
 
 def _err(msg):
@@ -98,6 +117,22 @@ def cmd_audit(a):
         else:
             print('warning: could not read baseline %s, diff skipped'
                   % a.baseline, file=sys.stderr)
+    if getattr(a, 'policies', None):
+        # audit --policy: evaluate right here and embed the compliance
+        # report into the scan JSON (rep['policy_report'])
+        try:
+            import policies
+            policy_files = list(a.policies)
+            rep['policy_report'] = policies.evaluate_policies(
+                rep, str(root), policy_files)
+            s = rep['policy_report'].get('summary', {})
+            print('policy: %d rules, %d violations'
+                  % (s.get('rules', 0), s.get('violations', 0)))
+        except policies.PolicyError as exc:
+            return _err(str(exc))
+        except ImportError:
+            print('warning: policies.py unavailable, policy step skipped',
+                  file=sys.stderr)
     try:
         Path(a.out).write_text(
             json.dumps(rep, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -145,6 +180,32 @@ def cmd_audit(a):
     if a.focus:
         line += ' (focus: %s)' % a.focus
     print(line)
+    # success path only: leave a row in the root-local history. A focused
+    # report is partial and would skew the trend, so it is not recorded.
+    # History must never fail the audit.
+    if not a.focus:
+        try:
+            hconn = audit_history.init_db(
+                audit_history.default_db_path(root))
+            try:
+                audit_history.record_scan(
+                    hconn, rep, scan_file=str(Path(a.out).resolve()))
+            finally:
+                hconn.close()
+        except Exception:
+            pass
+    # CI gate: the report (and history row) is already on disk, so this
+    # fires only after a successful write. 'none' short-circuits and the
+    # exit code stays 0 regardless of findings (back-compat).
+    if a.fail_on != 'none':
+        floor = SEVERITY_RANK[a.fail_on]
+        hits = [f for f in rep.get('findings_detailed') or []
+                if f.get('status') == 'fail'
+                and SEVERITY_RANK.get(f.get('severity'), -1) >= floor]
+        if hits:
+            print('fail-on: %d finding(s) at or above %s with status fail'
+                  % (len(hits), a.fail_on.upper()))
+            return 1
     return 0
 
 
@@ -318,7 +379,183 @@ def cmd_ui(a):
         argv += ['--baseline', a.baseline]
     if a.no_open:
         argv += ['--no-open']
+    if a.token:
+        argv += ['--token']
     return ui_server.main(argv)
+
+
+def cmd_history(a):
+    root = Path(a.root).resolve()
+    if not root.is_dir():
+        return _err('not a directory: %s' % root)
+    db = Path(a.db).resolve() if a.db else audit_history.default_db_path(root)
+
+    if a.record:
+        rep = _load_json(a.record)
+        if rep is None:
+            return 1
+        try:
+            conn = audit_history.init_db(db)
+        except (OSError, sqlite3.Error) as exc:
+            return _err('cannot open history db %s: %s' % (db, exc))
+        try:
+            scan_id = audit_history.record_scan(
+                conn, rep, scan_file=str(Path(a.record).resolve()))
+        except sqlite3.Error as exc:
+            return _err('cannot record scan: %s' % exc)
+        finally:
+            conn.close()
+        print('history: recorded scan %d (%d findings) -> %s'
+              % (scan_id, len(rep.get('findings') or []), db))
+        return 0
+
+    if not db.exists():
+        return _err('no history database at %s (run an audit or --record first)'
+                    % db)
+    try:
+        conn = audit_history.init_db(db)
+    except (OSError, sqlite3.Error) as exc:
+        return _err('cannot open history db %s: %s' % (db, exc))
+
+    try:
+        if a.diff:
+            old_id, new_id = a.diff
+            for sid in (old_id, new_id):
+                if audit_history.get_scan(conn, sid) is None:
+                    return _err('no scan with id %d in %s' % (sid, db))
+            diff = audit_history.diff_scans(conn, old_id, new_id)
+            for name in ('new', 'resolved', 'persisting', 'changed'):
+                items = diff[name]
+                print('%s (%d)' % (name.upper(), len(items)))
+                for f in items[:10]:
+                    print('  [%s] %s' % (f.get('section'), f.get('path')))
+                if len(items) > 10:
+                    print('  ... and %d more' % (len(items) - 10))
+            print('history diff: %d new, %d resolved, %d persisting, %d changed'
+                  % tuple(len(diff[k]) for k in
+                          ('new', 'resolved', 'persisting', 'changed')))
+            return 0
+
+        if a.regressions:
+            last = conn.execute(
+                'SELECT id FROM scans WHERE root = ? ORDER BY id DESC LIMIT 1',
+                (str(root),)).fetchone()
+            if last is None:
+                print('history: no recorded scan for root %s' % root)
+                return 0
+            regs = audit_history.regressions(conn, last[0])
+            prev = conn.execute(
+                'SELECT id FROM scans WHERE root = ? AND id < ?'
+                ' ORDER BY id DESC LIMIT 1', (str(root), last[0])).fetchone()
+            print('regressions: %d (scan %d vs %s)'
+                  % (len(regs), last[0], prev[0] if prev else '-'))
+            for r in regs:
+                print('  [%s] %s  %s' % (r.get('gate'), r.get('fid'),
+                                         '; '.join(r['reasons'])))
+            return 0
+
+        if a.trend:
+            points = audit_history.trend(conn)
+            lines = [','.join(['ts', 'total']
+                              + list(audit_history.TREND_SEVERITIES))]
+            for p in points:
+                lines.append(','.join(
+                    [str(p['ts']), str(p['total'])]
+                    + [str(p[name]) for name in audit_history.TREND_SEVERITIES]))
+            text = '\n'.join(lines) + '\n'
+            if a.out:
+                try:
+                    Path(a.out).write_text(text, encoding='utf-8')
+                except OSError as exc:
+                    return _err('cannot write %s: %s' % (a.out, exc))
+                print('history trend: %d points -> %s' % (len(points), a.out))
+            else:
+                sys.stdout.write(text)
+            return 0
+
+        if a.prune is not None:
+            deleted = audit_history.prune(conn, a.prune)
+            print('history prune: kept %d newest scans, deleted %d'
+                  % (a.prune, deleted))
+            return 0
+
+        scans = audit_history.list_scans(conn, a.last)
+        print('history: %d scan(s) in %s' % (len(scans), db))
+        for s in scans:
+            sev = s['severity_counts']
+            print('  %4d  %s  total %4d  crit %d high %d med %d low %d%s'
+                  % (s['id'], s['ts'], s['findings_total'],
+                     sev.get('critical', 0), sev.get('high', 0),
+                     sev.get('medium', 0), sev.get('low', 0),
+                     '  ' + str(s['scan_file']) if s['scan_file'] else ''))
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_policy(a):
+    rep = _load_json(a.scan)
+    if rep is None:
+        return 1
+    root = rep.get('root')
+    if not root:
+        return _err('scan has no root; re-run the audit')
+    try:
+        import policies
+    except ImportError:
+        return _err('policies.py not found next to agents_doctor.py')
+    policy_files = list(a.policies or [])
+    if not policy_files:
+        # no explicit files: discover policy packs in installed plugins
+        # plus workspace-level .agents-doctor.toml [policy] files
+        policy_files = policies.discover_policy_files(
+            root, rep.get('home'))
+        if not policy_files:
+            return _err('no --policy given and no policy packs found '
+                        '(see docs/policies.md)')
+        print('policy files discovered: %s'
+              % ', '.join(str(f) for f in policy_files))
+    try:
+        report = policies.evaluate_policies(rep, root, policy_files)
+    except policies.PolicyError as exc:
+        return _err(str(exc))
+    if a.format == 'md':
+        text = policies.render_markdown(report)
+    else:
+        text = json.dumps(report, ensure_ascii=False, indent=2)
+    if a.out:
+        try:
+            Path(a.out).write_text(text, encoding='utf-8')
+        except OSError as exc:
+            return _err('cannot write %s: %s' % (a.out, exc))
+    else:
+        print(text)
+    s = report.get('summary', {})
+    print('policy: %d rules, %d violations (fail %d, warn %d, info %d, '
+          'unknown %d, suppressed %d)'
+          % (s.get('rules', 0), s.get('violations', 0), s.get('fail', 0),
+             s.get('warn', 0), s.get('info', 0), s.get('unknown', 0),
+             s.get('suppressed', 0)))
+    return 0
+
+
+def cmd_watch(a):
+    root = Path(a.root).resolve()
+    if not root.is_dir():
+        return _err('not a directory: %s' % root)
+    try:
+        import watch as watch_mod
+    except ImportError:
+        return _err('watch.py not found next to agents_doctor.py')
+    try:
+        scans = watch_mod.watch(root, home=Path(a.home).resolve(),
+                                interval=a.interval, once=a.once,
+                                db=a.db, deep=a.deep)
+    except KeyboardInterrupt:
+        print('\nwatch: stopped')
+        return 0
+    print('watch: %d scan(s) performed' % scans)
+    return 0
 
 
 # --- parser ----------------------------------------------------------------------
@@ -350,6 +587,12 @@ def build_parser():
                          '(new and resolved findings)')
     pa.add_argument('--out', default='scan.json',
                     help='where to write the JSON report (default: scan.json)')
+    pa.add_argument('--fail-on', choices=FAIL_ON_CHOICES, default='none',
+                    help='CI gate: exit 1 after the report is written when '
+                         'at least one finding has status fail and severity '
+                         'at or above this level '
+                         '(critical>high>medium>low>info); default none '
+                         'keeps the exit code 0 whatever the findings')
     pa.add_argument('--report', default=None, metavar='AUDIT.md',
                     help='also write a markdown report '
                          '(needs report_generator.py)')
@@ -358,6 +601,11 @@ def build_parser():
                          'binaries of detected harnesses (--version, '
                          'timeout-bounded), git/python presence, static '
                          'MCP config validation. No network requests.')
+    pa.add_argument('--policy', action='append', default=None,
+                    dest='policies', metavar='FILE.yml',
+                    help='evaluate policy YAML file(s) after the scan and '
+                         'embed the compliance report into the JSON '
+                         '(repeatable; see docs/policies.md)')
     pa.set_defaults(func=cmd_audit)
 
     ps = sub.add_parser(
@@ -413,7 +661,72 @@ def build_parser():
     pui.add_argument('--port', type=int, default=8765)
     pui.add_argument('--no-open', action='store_true',
                      help='do not open the browser automatically')
+    pui.add_argument('--token', action='store_true',
+                     help='require a bearer token for /api/* requests')
     pui.set_defaults(func=cmd_ui)
+
+    ph = sub.add_parser(
+        'history', help='local audit history: list scans, diff, '
+                        'regressions, trend, prune (root-local SQLite)')
+    ph.add_argument('root', help='workspace root directory')
+    ph.add_argument('--db', default=None, metavar='PATH',
+                    help='history database (default: '
+                         '<root>/.agents-doctor/history.db)')
+    ph.add_argument('--last', type=int, default=50, metavar='N',
+                    help='how many scans the listing shows (default: 50)')
+    ph.add_argument('--record', default=None, metavar='scan.json',
+                    help='record a finished scan report into the history')
+    ph.add_argument('--diff', nargs=2, type=int, default=None,
+                    metavar=('OLD_ID', 'NEW_ID'),
+                    help='fingerprint diff between two recorded scans')
+    ph.add_argument('--regressions', action='store_true',
+                    help='findings that got worse in the last scan of this '
+                         'root (severity up, or pass/warn -> fail)')
+    ph.add_argument('--trend', action='store_true',
+                    help='CSV trend of totals and severity counts over time '
+                         '(stdout, or --out file)')
+    ph.add_argument('--prune', type=int, default=None, metavar='N',
+                    help='keep only the N newest scans, delete the rest')
+    ph.add_argument('--out', default=None, metavar='FILE',
+                    help='output file for --trend (default: stdout)')
+    ph.set_defaults(func=cmd_history)
+
+    pp = sub.add_parser(
+        'policy', help='evaluate corporate policies against a finished '
+                       'scan and write a compliance report')
+    pp.add_argument('scan', help='scan.json from an audit')
+    pp.add_argument('--policy', action='append', default=None,
+                    dest='policies', metavar='FILE.yml',
+                    help='policy YAML file; repeat to layer (later files '
+                         'override earlier ones per domain). Without any '
+                         '--policy, policy packs are discovered in '
+                         'installed plugins and .agents-doctor.toml '
+                         '[policy] files (see docs/policies.md)')
+    pp.add_argument('--out', default=None, metavar='report.json',
+                    help='write the report here (default: stdout)')
+    pp.add_argument('--format', choices=['json', 'md'], default='json',
+                    help='report format (default: json; md is a '
+                         'rule/status/violations/severity table)')
+    pp.set_defaults(func=cmd_policy)
+
+    pw = sub.add_parser(
+        'watch', help='watch the workspace configuration and re-audit '
+                      'when it changes; every run lands in the history')
+    pw.add_argument('root', help='workspace root directory')
+    pw.add_argument('--home', default=str(Path.home()),
+                    help='home directory (default: this user home)')
+    pw.add_argument('--interval', type=int, default=10, metavar='SEC',
+                    help='poll interval in seconds (default: 10)')
+    pw.add_argument('--once', action='store_true',
+                    help='daemon-free mode for cron: scan only when the '
+                         'configuration changed since the last run, '
+                         'then exit')
+    pw.add_argument('--deep', action='store_true',
+                    help='scans include git history (slower)')
+    pw.add_argument('--db', default=None, metavar='PATH',
+                    help='history database (default: '
+                         '<root>/.agents-doctor/history.db)')
+    pw.set_defaults(func=cmd_watch)
     return p
 
 
