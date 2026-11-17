@@ -84,6 +84,20 @@ def cmd_audit(a):
     rep = audit_scan.scan(root, home, a.deep)
     if a.focus:
         apply_focus(rep, a.focus)
+    if a.baseline:
+        old = _load_baseline(a.baseline)
+        if old is not None:
+            old_fps = {f['fp'] for f in old.get('findings', [])}
+            new_fps = {f['fp'] for f in rep.get('findings', [])}
+            rep['diff'] = {
+                'new': [f for f in rep['findings'] if f['fp'] not in old_fps],
+                'resolved': [f for f in old.get('findings', [])
+                             if f['fp'] not in new_fps]}
+            print('baseline: %d new, %d resolved'
+                  % (len(rep['diff']['new']), len(rep['diff']['resolved'])))
+        else:
+            print('warning: could not read baseline %s, diff skipped'
+                  % a.baseline, file=sys.stderr)
     try:
         Path(a.out).write_text(
             json.dumps(rep, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -102,6 +116,35 @@ def cmd_audit(a):
     if a.focus:
         line += ' (focus: %s)' % a.focus
     print(line)
+    return 0
+
+
+def _load_baseline(path):
+    try:
+        return json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_sarif(a):
+    try:
+        rep = json.loads(Path(a.scan).read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        return _err('cannot read %s: %s' % (a.scan, exc))
+    try:
+        import sarif as sarif_mod
+    except ImportError:
+        return _err('sarif.py not found next to agents_doctor.py')
+    data = sarif_mod.to_sarif(rep)
+    try:
+        Path(a.out).write_text(
+            json.dumps(data, indent=2), encoding='utf-8')
+    except OSError as exc:
+        return _err('cannot write %s: %s' % (a.out, exc))
+    rules = len(data.get('runs', [{}])[0].get('tool', {})
+                .get('driver', {}).get('rules', []))
+    results = len(data.get('runs', [{}])[0].get('results', []))
+    print('sarif: %d rules, %d results -> %s' % (rules, results, a.out))
     return 0
 
 
@@ -232,12 +275,22 @@ def build_parser():
     pa.add_argument('--focus', choices=sorted(FOCUS_SPECS), default=None,
                     help='keep only part of the report: security=G6,G7; '
                          'structure=G1,G4,G9; agents=G2,G3,G5,G8')
+    pa.add_argument('--baseline', default=None, metavar='PREV.json',
+                    help='previous scan.json: adds a diff section '
+                         '(new and resolved findings)')
     pa.add_argument('--out', default='scan.json',
                     help='where to write the JSON report (default: scan.json)')
     pa.add_argument('--report', default=None, metavar='AUDIT.md',
                     help='also write a markdown report '
                          '(needs report_generator.py)')
     pa.set_defaults(func=cmd_audit)
+
+    ps = sub.add_parser(
+        'sarif', help='convert scan.json to SARIF 2.1.0 for CI')
+    ps.add_argument('scan', help='scan.json from an audit')
+    ps.add_argument('--out', default='report.sarif',
+                    help='output SARIF file (default: report.sarif)')
+    ps.set_defaults(func=cmd_sarif)
 
     pc = sub.add_parser(
         'compare', help='diff two scan.json files by finding fingerprints')

@@ -26,23 +26,33 @@ code), 1 when the root is not a directory or the report cannot be written,
 2 on unknown flags. An unreadable `--baseline` file is skipped, not an
 error.
 
-## CLI entry: agents_doctor.py (stage 4)
+## CLI entry: agents_doctor.py
 
-One command over the scanner and the stage-4 modules.
+One command over the scanner and all modules.
 
 ```
 python skills/agents-doctor/scripts/agents_doctor.py audit <path>
-    [--focus security|structure|agents] [--report md|sarif|both]
-    [--deep] [--home <dir>] [--baseline <scan.json>] [--out <file>]
+    [--focus security|structure|agents]
+    [--deep] [--home <dir>] [--baseline <prev.json>]
+    [--out scan.json] [--report AUDIT.md]
 ```
 
-Runs the scan, then writes the markdown report and/or the SARIF export.
-`--focus` narrows the report to one gate group; the scan stays full. With
-findings present the subcommand exits 1, so CI can gate on it.
+Runs the scan in-process, writes scan.json, optionally writes a markdown
+report (`--report`). `--focus` narrows gates and findings to one group:
+security=G6,G7; structure=G1,G4,G9; agents=G2,G3,G5,G8. `--baseline`
+adds a diff section (new and resolved findings) by comparing fingerprints
+with a previous scan. `--deep` also scans git history for secrets.
 
 ```
-python skills/agents-doctor/scripts/agents_doctor.py compare <scan.json>
-    --baseline <old scan.json>
+python skills/agents-doctor/scripts/agents_doctor.py sarif <scan.json>
+    [--out report.sarif]
+```
+
+Converts a scan JSON to SARIF 2.1.0 for CI integrations. One rule per
+gate, one result per fail/warn finding, stable fingerprints.
+
+```
+python skills/agents-doctor/scripts/agents_doctor.py compare <new.json> <old.json>
 ```
 
 Prints the fingerprint diff: NEW, RESOLVED, PERSISTING, CHANGED.
@@ -55,15 +65,14 @@ Prints one typed finding: title, description, evidence, severity, status,
 confidence, recommendation.
 
 ```
-python skills/agents-doctor/scripts/agents_doctor.py fix <scan.json>
-    --fid <fid> [--apply]
+python skills/agents-doctor/scripts/agents_doctor.py fix <scan.json> <fid> [--apply]
 ```
 
-Prints the remediation plan. `--apply` executes it (moves to
-`.agents-doctor-trash/`, never deletes); run an audit again afterwards.
+Prints the remediation plan. `--apply` executes it after an interactive
+confirmation (moves to `.agents-doctor-trash/`, never deletes). Run an
+audit again afterwards for the before/after report.
 
-Exit codes: 0 success, 1 findings present or a failed check, 2 requested
-fid or file not found.
+Exit codes: 0 success, 1 error, 2 not found or bad usage.
 
 ## Report writer: report_generator.py (stage 4)
 

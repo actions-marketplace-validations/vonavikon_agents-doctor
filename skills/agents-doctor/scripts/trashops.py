@@ -581,8 +581,11 @@ def _entry_action(entry):
 
 def _undo_target(root, orig):
     """Validated absolute destination for undoing original_path: the
-    relative shape must be safe and the resolved path must stay under
-    root and out of the trash folder. Raises ValueError otherwise."""
+    relative shape must be safe, the resolved path must stay under
+    root and out of the trash folder, and (P0.1) the whole literal
+    chain below root must be symlink-free -- a link planted at the
+    original spot or anywhere above it refuses the undo. Raises
+    ValueError otherwise."""
     if not _rel_shape_ok(orig):
         raise ValueError('path has an unsafe shape')
     dst = root / os.path.normpath(orig)
@@ -591,6 +594,10 @@ def _undo_target(root, orig):
             or resolved.parts[len(root.parts)] == TRASH_DIR_NAME:
         raise ValueError('original path escapes root or sits in the '
                          'trash folder')
+    ok, reason = _pre_operation_check(root, dst, allow_missing=True)
+    if not ok:
+        raise ValueError('restore destination refused (%s): %s'
+                         % (reason, dst))
     return dst
 
 
@@ -634,13 +641,6 @@ def _undo_entry(run_dir, root, entry):
                     break
             else:
                 raise OSError('no free restore destination for %s' % dst)
-        # P0.1 gate on the restore destination: reachable through a
-        # real directory chain under root only -- a symlink planted at
-        # the original spot or anywhere above it refuses the undo
-        ok, reason = _pre_operation_check(root, dst, allow_missing=True)
-        if not ok:
-            raise ValueError('restore destination refused (%s): %s'
-                             % (reason, dst))
         if _exists(dst):
             # the name was free during the collision check: something
             # raced us; never move onto an appeared path
@@ -703,7 +703,10 @@ def restore(run_dir, root=None, opid=None, assume_yes=False, confirm=None):
     same way; their rmdir entries say restorable: false and are
     counted as not restorable instead of being undone. Both sides are
     containment-checked: the trash copy must stay under the run dir,
-    every undo target under root. Each undo is itself write-ahead
+    every undo target under root and reachable through a symlink-free
+    chain (the P0.1 pre-operation gate; a file entry whose size no
+    longer matches the manifest record is refused as tampered). Each
+    undo is itself write-ahead
     ('restoring' before the act), and the entry ends as 'restored'
     (with restored_to) or 'restore_failed' (with error); a skipped
     undo keeps its previous status so a later restore can retry it.

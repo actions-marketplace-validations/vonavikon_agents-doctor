@@ -589,6 +589,26 @@ class WriteAheadManifest(SafeCleanCase):
         self.assertEqual(data['totals']['moved'], 1)
 
 
+class RefusedTrashRun(SafeCleanCase):
+    """P0.1: a trash run the pre-operation gate refuses (e.g. the trash
+    folder swapped for a symlink, attack d in tests/test_toctou_security)
+    is recorded as a failure instead of crashing the batch."""
+
+    def test_refused_run_recorded_as_failure_not_crash(self):
+        plan = crafted_plan(self.ws, ('screenshot_1.png', 'trash'))
+        with mock.patch.object(
+                trashops.TrashRun, '__init__',
+                side_effect=trashops.SecurityRefusal('probe refusal')):
+            summary = safe_clean.execute(plan, self.ws,
+                                         confirm=lambda p: 'YES')
+        self.assertEqual(summary['moved'], [])
+        self.assertEqual(summary['removed_dirs'], [])
+        self.assertEqual(len(summary['failed']), 1)
+        self.assertIn('probe refusal', summary['failed'][0]['error'])
+        self.assertTrue((self.ws / 'screenshot_1.png').is_file())
+        self.assertIsNone(summary['trash_dir'])
+
+
 class CrashRecovery(SafeCleanCase):
     def _fabricate_interrupted_run(self):
         run_dir = self.ws / TRASH / '20250101-000000-aaaabbbb'

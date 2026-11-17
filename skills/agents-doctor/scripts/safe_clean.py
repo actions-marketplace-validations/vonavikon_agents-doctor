@@ -380,9 +380,11 @@ def execute(plan, root, assume_yes=False, confirm=None):
     must be exactly 'YES'; assume_yes skips the prompt and exists for
     automation and tests only), then every item under its own try/except
     with the containment and NEVER checks re-run right before it, plus
-    the TOCTOU re-stat: an item whose size, mtime_ns or type changed
-    since build_plan is aborted as 'changed' and the disk is left alone
-    for it. A failing, refused or changed item never aborts the batch.
+    the P0.1 pre-operation gate trashops._pre_operation_check and the
+    TOCTOU re-stat: an item whose size, mtime_ns or type changed since
+    build_plan, or whose path chain carries a symlink, is aborted (as
+    'changed' / 'symlink' / 'escape') and the disk is left alone for
+    it. A failing, refused or changed item never aborts the batch.
 
     The run lands in <root>/<TRASH_DIR_NAME>/<stamp>-<opid>/ with a
     write-ahead manifest.json (trashops.TrashRun). Before the run
@@ -409,9 +411,17 @@ def execute(plan, root, assume_yes=False, confirm=None):
             return summary
     max_bytes = min(int(plan.get('max_bytes') or HARD_MAX_BYTES), HARD_MAX_BYTES)
 
-    interrupted = trashops.find_interrupted(root)
+    try:
+        interrupted = trashops.find_interrupted(root)
+        run = trashops.TrashRun(root, 'safe_clean', interrupted=interrupted)
+    except trashops.SecurityRefusal as exc:
+        # e.g. the trash folder was swapped for a symlink between the
+        # plan and the execute: record the refusal, touch nothing
+        summary['failed'].append(
+            {'path': trashops.TRASH_DIR_NAME,
+             'error': '%s: %s' % (type(exc).__name__, exc)})
+        return summary
     summary['interrupted_run'] = interrupted
-    run = trashops.TrashRun(root, 'safe_clean', interrupted=interrupted)
     summary['trash_dir'] = str(run.run_dir)
     summary['opid'] = run.opid
     summary['manifest_path'] = str(run.manifest_path)
@@ -430,6 +440,17 @@ def execute(plan, root, assume_yes=False, confirm=None):
         target = root / os.path.normpath(rel)
         if not _exists(target):
             summary['skipped_safety'].append({'path': rel, 'reason': 'missing'})
+            counts['skipped'] += 1
+            continue
+        # P0.1 gate: containment + symlink-free chain + snapshot match,
+        # immediately before the mutation (the user confirmed already);
+        # the symlink walk runs first so a swapped parent or target is
+        # reported as 'symlink', not as ordinary drift
+        ok, reason = trashops._pre_operation_check(
+            root, target, it.get('stat'),
+            expected_type=('dir' if it.get('action') == 'rmdir' else None))
+        if not ok:
+            summary['skipped_safety'].append({'path': rel, 'reason': reason})
             counts['skipped'] += 1
             continue
         cur = trashops.snapshot(target)   # re-stat right before acting
@@ -452,7 +473,8 @@ def execute(plan, root, assume_yes=False, confirm=None):
                 counts['removed_dirs'] += 1
             elif it.get('action') == 'trash':
                 dst, _idx = trashops.move_to_trash(
-                    run, target, rel, it.get('size') or 0,
+                    run, target, rel,
+                    (cur or {}).get('size') or it.get('size') or 0,
                     (cur or {}).get('mtime_ns'), (cur or {}).get('type'))
                 summary['moved'].append({'path': rel, 'moved_to': str(dst),
                                          'size_bytes': it.get('size') or 0,

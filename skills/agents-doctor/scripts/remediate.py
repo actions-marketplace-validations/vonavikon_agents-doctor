@@ -32,9 +32,15 @@ Safety model:
   empty directories, written .gitignore files -- with
   `safe_clean.py restore <run_dir>`;
 - every planned target carries a plan-time TOCTOU snapshot {size,
-  mtime_ns, type}; apply re-stats rmdir and trash_move steps right
-  before acting and skips the step as 'changed' when the path changed
-  since planning;
+  mtime_ns, type}; immediately before each mutation (after the user
+  confirmed) trashops._pre_operation_check re-verifies canonical
+  containment under the root, a symlink-free literal path chain, the
+  expected type and the snapshot; a drifted target is skipped as
+  'changed', a swapped symlink or an escape raises
+  trashops.SecurityRefusal and is recorded as a failed step;
+- the .gitignore write creates the file with os.open(O_CREAT|O_EXCL):
+  a name that appears (or a link planted) between the check and the
+  write can never be overwritten or written through;
 - rmdir goes through os.rmdir (a non-empty directory fails loudly) and
   is journaled, so restore can recreate the empty directory;
 - a failing step is recorded and the run continues with the next step;
@@ -294,17 +300,39 @@ def _execute_step(step, root, get_run):
     CHANGED. get_run() lazily creates the shared trash run (opid +
     manifest) the first time a step needs it. Every mutating action --
     trash_move, rmdir, write_gitignore -- is journaled in that run's
-    write-ahead manifest, so the whole plan is one undoable unit."""
+    write-ahead manifest, so the whole plan is one undoable unit.
+
+    P0.1: every mutating action runs trashops._pre_operation_check
+    immediately before it touches the disk (after the user confirmed):
+    canonical containment under root, no symlink anywhere in the
+    literal path chain, expected type and the plan-time snapshot must
+    all hold. A drifted target returns CHANGED; a swapped symlink or
+    an escape raises trashops.SecurityRefusal and the step is recorded
+    as failed."""
     action = step.get('action')
     target = Path(step.get('target', ''))
     cur = None
     if action in ('rmdir', 'trash_move'):
-        # TOCTOU re-stat right before acting: anything that changed
-        # since plan() is skipped as CHANGED, disk untouched
+        # P0.1 gate: the symlink walk runs first, so a swapped link is
+        # diagnosed as an attack, not as ordinary drift; then
+        # containment; then the snapshot comparison
+        ok, reason = trashops._pre_operation_check(
+            root, target, step.get('snapshot'),
+            expected_type=('dir' if action == 'rmdir' else None))
+        if not ok:
+            if reason == 'changed':
+                return CHANGED   # drifted since plan(): skip, disk untouched
+            if reason == 'missing' and action == 'rmdir':
+                return CHANGED   # vanished since plan(): nothing to remove
+            if reason == 'missing':
+                raise OSError('source missing: %s' % target)
+            raise trashops.SecurityRefusal(
+                '%s refused (%s): %s' % (action, reason, target))
         cur = trashops.snapshot(target)
-        if not trashops.unchanged(step.get('snapshot'), cur):
-            return CHANGED
     if action == 'rmdir':
+        with os.scandir(str(target)) as it:
+            if next(it, None) is not None:
+                return CHANGED   # no longer empty: skip, os.rmdir would too
         rel = target.resolve().relative_to(root).as_posix()
         run = get_run()
         # os.rmdir inside: loud failure when not empty or missing
@@ -314,17 +342,25 @@ def _execute_step(step, root, get_run):
     if action == 'write_gitignore':
         if target.exists():
             return SKIPPED  # never overwrite an existing .gitignore
+        if os.path.islink(str(target)):
+            raise trashops.SecurityRefusal(
+                'write_gitignore refused (symlink): %s' % target)
         if not target.parent.is_dir():
             raise OSError('parent directory missing: %s' % target.parent)
+        ok, reason = trashops._pre_operation_check(
+            root, target.parent, expected_type='dir')
+        if not ok:
+            raise trashops.SecurityRefusal(
+                'write_gitignore refused (%s): %s' % (reason, target.parent))
         rel = target.resolve().relative_to(root).as_posix()
         run = get_run()
+        # O_CREAT|O_EXCL inside: a name planted between the checks and
+        # the write can neither be written through nor overwritten
         trashops.record_create_file(run, target, rel, gitignore_template())
         return {'action': action, 'target': str(target), 'result': 'created',
                 'trash_run': str(run.run_dir), 'opid': run.opid}
     if action == 'trash_move':
         src = target
-        if not src.exists():
-            raise OSError('source missing: %s' % src)
         rel = src.resolve().relative_to(root).as_posix()
         snap = step.get('snapshot') or {}
         run = get_run()

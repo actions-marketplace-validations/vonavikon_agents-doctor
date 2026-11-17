@@ -294,7 +294,7 @@ class RemediateJournaling(RollbackCase):
 class IdempotentRestore(RollbackCase):
     def test_second_restore_is_a_noop(self):
         junk = self.ws / 'temp-data.txt'
-        junk.write_text('data\n', encoding='utf-8')
+        junk.write_bytes(b'data\n')   # exact bytes: the size the journal gets
         run = self.new_run()
         trashops.move_to_trash(run, junk, 'temp-data.txt', 5, None, 'file')
         first, _err = self.restore(run.run_dir)

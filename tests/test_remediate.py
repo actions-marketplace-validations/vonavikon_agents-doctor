@@ -317,6 +317,66 @@ class ToctouRespect(RemediateCase):
         self.assertFalse((self.ws / remediate.TRASH_DIR_NAME).exists())
 
 
+class PreOpCheckUnit(RemediateCase):
+    """Direct probes of the P0.1 pre-operation gate
+    (trashops._pre_operation_check); the attack-level coverage lives in
+    tests/test_toctou_security.py."""
+
+    def check(self, target, **kw):
+        return trashops._pre_operation_check(self.ws, target, **kw)
+
+    def test_ok_for_targets_under_root(self):
+        f = self.ws / 'plain.txt'
+        f.write_text('x', encoding='utf-8')
+        self.assertEqual(self.check(f), (True, None))
+        self.assertEqual(self.check(f, snapshot=trashops.snapshot(f)),
+                         (True, None))
+        ok, _reason = self.check(self.repo, expected_type='dir')
+        self.assertTrue(ok)
+
+    def test_outside_target_is_escape(self):
+        out = self.base / 'out.txt'
+        out.write_text('x', encoding='utf-8')
+        self.assertEqual(self.check(out), (False, 'escape'))
+
+    def test_snapshot_drift_is_changed(self):
+        f = self.ws / 'drift.txt'
+        f.write_bytes(b'1')
+        snap = trashops.snapshot(f)
+        f.write_bytes(b'123')
+        self.assertEqual(self.check(f, snapshot=snap), (False, 'changed'))
+
+    def test_missing_target(self):
+        self.assertEqual(self.check(self.ws / 'gone.txt'), (False, 'missing'))
+        # create-style operations may build into a not-yet-existing path
+        self.assertEqual(self.check(self.ws / 'fresh' / 'new.txt',
+                                    allow_missing=True), (True, None))
+
+    def test_expected_type_mismatch_is_changed(self):
+        f = self.ws / 'afile.txt'
+        f.write_text('x', encoding='utf-8')
+        self.assertEqual(self.check(f, expected_type='dir'),
+                         (False, 'changed'))
+
+    def test_symlink_anywhere_in_the_chain_refused(self):
+        if not hasattr(os, 'symlink'):
+            self.skipTest('os.symlink unavailable')
+        # the link destination is INSIDE the workspace: containment
+        # alone would pass, only the literal-chain walk catches it
+        vault = self.ws / 'private'
+        vault.mkdir()
+        try:
+            os.symlink(str(vault), str(self.ws / 'lnk'))
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable on this system')
+        inside = vault / 'real.txt'
+        inside.write_text('x', encoding='utf-8')
+        self.assertEqual(self.check(self.ws / 'lnk' / 'real.txt'),
+                         (False, 'symlink'))
+        self.assertEqual(self.check(self.ws / 'lnk' / 'new.txt',
+                                    allow_missing=True), (False, 'symlink'))
+
+
 class BatchContinues(RemediateCase):
     def test_first_move_failing_second_still_moves(self):
         for name in ('temp-a.txt', 'temp-b.txt'):
