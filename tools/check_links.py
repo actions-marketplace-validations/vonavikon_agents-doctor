@@ -16,7 +16,8 @@ is a list of strings. CLI: python tools/check_links.py [root]. Exit 0 with
 '[OK] links (N files checked)', or exit 1 with one line per problem.
 
 Excluded from the walk: .git, node_modules, __pycache__, bench/work (bench
-fixtures), qa/scenarios/*/run (eval output), demo/employee-workspace and
+fixtures), qa/scenarios/*/run and tests/integration/run (eval output;
+fixture files carry dead links on purpose), demo/employee-workspace and
 demo/fake-home (generated demo trees). Python 3.10+, stdlib only.
 """
 import os
@@ -27,7 +28,8 @@ from pathlib import Path
 
 EXCLUDE_DIR_NAMES = {'.git', 'node_modules', '__pycache__'}
 EXCLUDE_PREFIXES = ('bench/work/', 'demo/employee-workspace/', 'demo/fake-home/')
-EXCLUDE_RES = (re.compile(r'^qa/scenarios/[^/]+/run(/|$)'),)
+EXCLUDE_RES = (re.compile(r'^qa/scenarios/[^/]+/run(/|$)'),
+               re.compile(r'^tests/integration/run(/|$)'))
 
 LINK_RX = re.compile(
     r'!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+"[^"]*")?\s*\)')
