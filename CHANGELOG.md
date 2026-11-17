@@ -4,6 +4,16 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [2.1.1] - 2026-11-17
+
+### Fixed
+
+- Web UI: the empty finding-card overlay covered the whole dashboard on
+  load and all tab panels rendered simultaneously. Cause: component
+  `display: flex` rules overrode the HTML `hidden` attribute (author
+  styles beat the UA stylesheet in the cascade). Guard rule
+  `[hidden] { display: none !important; }` fixes every such element.
+
 ## [2.1.0] - 2026-11-17
 
 Security & quality foundation (TZ v2.1 stage 1): policy engine, audit
