@@ -335,7 +335,10 @@ class PreOpCheckUnit(RemediateCase):
         self.assertTrue(ok)
 
     def test_outside_target_is_escape(self):
-        out = self.base / 'out.txt'
+        # resolve(): on macOS the temp dir lives behind a /tmp
+        # symlink; without resolving, the symlink check fires before
+        # the escape check and the reason word differs
+        out = (self.base / 'out.txt').resolve()
         out.write_text('x', encoding='utf-8')
         self.assertEqual(self.check(out), (False, 'escape'))
 
