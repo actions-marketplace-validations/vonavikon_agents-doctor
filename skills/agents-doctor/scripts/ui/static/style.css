@@ -2,6 +2,11 @@
    assets. Color is never the only signal: every status also carries a text
    label and/or a glyph. */
 
+/* The hidden attribute must always win: component display rules below
+   (flex/grid) otherwise override the UA stylesheet's [hidden] rule and
+   un-hide overlays and tab panels by accident. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #14161b;
   --bg-panel: #1b1e25;
