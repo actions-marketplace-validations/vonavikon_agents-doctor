@@ -26,6 +26,9 @@ keys in the same shapes still fire.
   everywhere in Claude Code; SessionStart/SessionEnd groups never
   carry one. Unknown events and groups without a command are still
   reported.
+- POLICY: policy files listed both by CLI discovery and by
+  .agents-doctor.toml [policy] were layered twice, doubling
+  policy_versions; discovery results are now deduplicated.
 
 ## [3.0.0] - 2026-11-18
 

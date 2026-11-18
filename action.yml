@@ -4,7 +4,7 @@
 # anything itself):
 #
 #   - uses: actions/checkout@v4
-#   - uses: vonavikon/agents-doctor@v2.1.0
+#   - uses: vonavikon/agents-doctor@v3
 #     with:
 #       path: '.'
 #       fail-on: critical
@@ -20,6 +20,10 @@
 
 name: 'agents-doctor audit'
 description: 'Audit an AI agent workspace: AGENTS.md health, secrets, policies'
+
+branding:
+  icon: activity
+  color: blue
 
 inputs:
   path:
