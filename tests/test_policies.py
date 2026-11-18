@@ -624,6 +624,18 @@ class ExceptionsTests(_TmpCase):
                             for w in report['warnings']))
         self.assertEqual(report['summary']['violations'], 0)
 
+    def test_workspace_file_not_layered_twice(self):
+        # the CLI discovery may already include the workspace toml files;
+        # layering must keep one entry per file in policy_versions
+        pol = self.policy(self.POLICY)
+        (self.root / '.agents-doctor.toml').write_text(
+            '[policy]\nfiles = ["%s"]\n' % Path(pol).name,
+            encoding='utf-8')
+        report = policies.evaluate_policies(
+            self.scan(), self.root, [str(pol)])
+        names = [v['file'] for v in report['policy_versions']]
+        self.assertEqual(names.count(Path(pol).name), 1)
+
     def test_exception_for_unknown_rule_warns(self):
         (self.root / '.agents-doctor.toml').write_text(
             '[policy]\nexceptions = { POL-NOPE = "typo" }\n',
