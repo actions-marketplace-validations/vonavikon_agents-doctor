@@ -1,7 +1,7 @@
 # agents-doctor
 
 <p align="center">
-  <img src="docs/logo.png" alt="agents-doctor logo" width="120" height="120">
+  <img src="docs/logo-rounded.png" alt="agents-doctor logo" width="120" height="120">
 </p>
 
 **Doctor for AI agent workspaces.** Checks AGENTS.md health, finds leaked secrets, cleans junk, and tells you what it costs you — in plain language (EN/RU). Understands eight harnesses (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, GitHub Copilot, Windsurf, Z Code), simulates which instructions actually load, detects conflicts between them, ships a local visual explorer — and since 2.1 enforces YAML security policies, keeps a local audit history, watches configuration changes and gates CI. Works standalone or through your agent. Read-only by default; cleanup is explicit, recoverable, and never automatic.
