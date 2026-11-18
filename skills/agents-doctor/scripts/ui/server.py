@@ -44,6 +44,12 @@ API (all GET unless noted, JSON):
   /api/fixplan                       ?fid=<id> remediation plan (dry)
   /api/mcp                           MCP server inventory (secret-free)
   /api/rescan              (POST)    rerun the scan in-process
+  /api/score                         Workspace Health Score (TZ 3.0 10.3)
+  /api/history             ?root=    last N recorded scans + regressions
+                                     of the newest one (audit_history db)
+  /api/trend               ?root=    one point per scan, oldest first
+  /api/diff                ?root=&old=&new=   fingerprint diff between
+                                     two recorded scans
 """
 from __future__ import annotations
 
@@ -66,6 +72,7 @@ SCRIPTS = UI_DIR.parent
 sys.path.insert(0, str(SCRIPTS))
 
 import audit_scan          # noqa: E402  (in-process rescan)
+import audit_history       # noqa: E402  (governance dashboard data)
 import mcp_inventory       # noqa: E402  (MCP server inventory)
 import secret_rules        # noqa: E402  (preview masking)
 import remediate           # noqa: E402  (dry-run plans only)
@@ -77,6 +84,25 @@ SEARCH_LIMIT_DEFAULT = 100
 SEARCH_LIMIT_MAX = 500
 SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 TREE_SORTS = ('name', 'size', 'problems')
+HISTORY_LIMIT_DEFAULT = 50   # /api/history scans per page
+HISTORY_LIMIT_MAX = 500
+
+# Workspace Health Score (TZ 3.0 section 10.3). Component groups over
+# the audit gates; the weight of every component is a code constant on
+# purpose. The TZ asks for configurable weights, but a read-only local
+# UI has no honest place to configure them from (a settings panel would
+# invite score tuning until the number looks good). Constants keep every
+# score reproducible; configurability is future CLI work (a flag that
+# bakes the weights into the scan report), not a UI knob.
+SCORE_COMPONENTS = (
+    ('security', 0.30, ('G6', 'G7')),
+    ('config', 0.20, ('G2',)),
+    ('instructions', 0.20, ('G3', 'G5')),
+    ('harness_compat', 0.15, ('G8', 'G1')),
+    ('hygiene', 0.10, ('G4', 'G9')),
+)
+SCORE_OBSERVABILITY_WEIGHT = 0.05   # observability = history db present
+SCORE_FORMULA = 'weighted sum; critical cap 40'
 
 
 class ApiUsageError(ValueError):
@@ -643,6 +669,207 @@ def api_mcp(state: UiState, _qs):
         return {'error': 'mcp inventory failed: %s' % exc}
 
 
+# ------------------------------------- governance dashboard (TZ 3.0 section 10)
+
+def _gate_critical_map(report: dict) -> dict:
+    """gid -> True when that gate has at least one fail finding of
+    critical severity. The same definition feeds the per-component
+    penalty and the global critical cap, so they can never disagree."""
+    crit = {}
+    for f in report.get('findings_detailed') or []:
+        if f.get('severity') == 'critical' and f.get('status') == 'fail':
+            crit[f.get('gate')] = True
+    return crit
+
+
+def compute_health_score(report: dict, history_available: bool) -> dict:
+    """Workspace Health Score (TZ 3.0 10.3): deterministic, explainable.
+
+    Per component: start at 100; -30 for every gate of the group that
+    fails WITH critical findings, -15 for a fail without them, -5 per
+    warn; clipped to 0..100. A gate whose status is unknown (or absent
+    from the report) makes the whole component null -- absence of data
+    is never mixed with a zero score. Overall = weighted sum of the
+    components; any critical+fail finding anywhere caps the total at 40
+    (critical_cap). Observability is not gate-based: the root-local
+    history database exists -> 100, else 0."""
+    statuses = {g.get('gid'): g.get('status')
+                for g in report.get('gates') or [] if g.get('gid')}
+    crit = _gate_critical_map(report)
+    components = {}
+    insufficient = []
+    for name, weight, gids in SCORE_COMPONENTS:
+        score = 100
+        for gid in gids:
+            st = statuses.get(gid)
+            if st is None or st == 'unknown':
+                score = None       # insufficient data, not a zero
+                break
+            if st == 'fail':
+                score -= 30 if crit.get(gid) else 15
+            elif st == 'warn':
+                score -= 5
+            # pass / not_applicable: no penalty
+        if score is None:
+            insufficient.append(name)
+        else:
+            score = max(0, min(100, score))
+        components[name] = {'score': score, 'weight': weight,
+                            'gates': list(gids)}
+    components['observability'] = {
+        'score': 100 if history_available else 0,
+        'weight': SCORE_OBSERVABILITY_WEIGHT,
+        'gates': [],
+    }
+    out = {
+        'components': components,
+        'formula': SCORE_FORMULA,
+        'critical_cap': False,
+        'computed_at': datetime.now().astimezone().isoformat(
+            timespec='seconds'),
+        'gates_basis': statuses,
+    }
+    if insufficient:
+        out['score'] = None
+        out['note'] = ('insufficient data: unknown gate status in %s'
+                       % ', '.join(insufficient))
+        return out
+    total = round(sum(c['score'] * c['weight']
+                      for c in components.values()), 2)
+    if crit:
+        out['critical_cap'] = True
+        total = min(total, 40)
+    out['score'] = total
+    return out
+
+
+def _history_root(state: UiState, qs):
+    """Resolve ?root= for the history endpoints: absent means the
+    audited root; any other root is refused -- the UI reads exactly one
+    workspace and never opens a foreign database from the wire."""
+    raw = (qs.get('root', [''])[0] or '').strip()
+    if not raw:
+        return state.root
+    try:
+        resolved = Path(raw).resolve()
+    except (OSError, ValueError) as exc:
+        raise ApiUsageError('bad root path: %s' % exc)
+    if resolved != state.root:
+        raise PermissionError('root must match the audited workspace')
+    return resolved
+
+
+def _open_history(state: UiState, qs):
+    """(connection-or-None, db_path) for the audited root. None means
+    the workspace has no history database yet -- a normal state, not an
+    error. One short-lived connection per request: the server is
+    threaded and sqlite connections must not cross threads."""
+    root = _history_root(state, qs)
+    db = audit_history.default_db_path(root)
+    if not db.exists():
+        return None, db
+    return audit_history.init_db(db), db
+
+
+def api_score(state: UiState, _qs):
+    """Workspace Health Score over the loaded report; observability
+    comes from the presence of the root-local history database."""
+    history_available = audit_history.default_db_path(state.root).exists()
+    out = compute_health_score(state.report, history_available)
+    out['history_available'] = history_available
+    return out
+
+
+def api_history(state: UiState, qs):
+    """Last N recorded scans (newest first) plus the regressions of the
+    newest scan (TZ 3.0 section 10). No history database yet ->
+    available: False with empty lists, never an error."""
+    raw_limit = qs.get('limit', [''])[0]
+    if raw_limit in ('', None):
+        limit = HISTORY_LIMIT_DEFAULT
+    else:
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            raise ApiUsageError('limit must be an integer')
+        if not 1 <= limit <= HISTORY_LIMIT_MAX:
+            raise ApiUsageError('limit must be between 1 and %d'
+                                % HISTORY_LIMIT_MAX)
+    try:
+        conn, _db = _open_history(state, qs)
+    except PermissionError as exc:
+        return {'error': str(exc), 'available': False}
+    if conn is None:
+        return {'available': False, 'scans': [], 'regressions': []}
+    try:
+        scans = [{'id': s['id'], 'ts': s['ts'],
+                  'findings_total': s['findings_total'],
+                  'severity_counts': s['severity_counts'],
+                  'gate_statuses': s['gate_statuses']}
+                 for s in audit_history.list_scans(conn, limit)]
+        regs = audit_history.regressions(conn, scans[0]['id']) \
+            if scans else []
+        return {'available': True, 'scans': scans, 'regressions': regs}
+    finally:
+        conn.close()
+
+
+def api_trend(state: UiState, qs):
+    """One point per recorded scan of this root, oldest first (the
+    audit_history.trend shape: ts, total, one column per severity)."""
+    try:
+        conn, _db = _open_history(state, qs)
+    except PermissionError as exc:
+        return {'error': str(exc), 'available': False}
+    if conn is None:
+        return {'available': False, 'points': []}
+    try:
+        return {'available': True,
+                'points': audit_history.trend(conn, root=str(state.root))}
+    finally:
+        conn.close()
+
+
+def api_diff(state: UiState, qs):
+    """Fingerprint diff between two recorded scans -- the 'before/after
+    the fix' view over the history database. Uses the same engine as
+    /api/compare (remediate.fingerprint_diff), so file diffs and
+    history diffs can never disagree."""
+    raw_old = qs.get('old', [''])[0]
+    raw_new = qs.get('new', [''])[0]
+    try:
+        old_id, new_id = int(raw_old), int(raw_new)
+    except (TypeError, ValueError):
+        raise ApiUsageError('old and new must be integer scan ids')
+    if old_id < 1 or new_id < 1:
+        raise ApiUsageError('old and new must be positive scan ids')
+    try:
+        conn, _db = _open_history(state, qs)
+    except PermissionError as exc:
+        return {'error': str(exc), 'supported': False}
+    if conn is None:
+        return {'error': 'no history database in this workspace',
+                'supported': False}
+    try:
+        for sid in (old_id, new_id):
+            if audit_history.get_scan(conn, sid) is None:
+                return {'error': 'unknown scan id %d' % sid,
+                        'supported': False}
+        diff = audit_history.diff_scans(conn, old_id, new_id)
+    finally:
+        conn.close()
+    for name in ('new', 'resolved', 'persisting', 'changed'):
+        for f in diff.get(name) or []:
+            f.pop('fp', None)   # fingerprints are internal
+    return {
+        'supported': True,
+        'old_id': old_id,
+        'new_id': new_id,
+        'summary': {k: len(v) for k, v in diff.items()},
+        'diff': diff,
+    }
+
+
 def make_handler(state: UiState, token: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -791,6 +1018,14 @@ def make_handler(state: UiState, token: str | None = None):
                     self._json(api_compare(state, qs))
                 elif route == '/api/mcp':
                     self._json(api_mcp(state, qs))
+                elif route == '/api/score':
+                    self._json(api_score(state, qs))
+                elif route == '/api/history':
+                    self._json(api_history(state, qs))
+                elif route == '/api/trend':
+                    self._json(api_trend(state, qs))
+                elif route == '/api/diff':
+                    self._json(api_diff(state, qs))
                 else:
                     self._json({'error': 'no such route'}, 404)
             except BrokenPipeError:

@@ -767,3 +767,70 @@ details.ev-json pre {
   .inspector { width: 100%; max-width: none; min-width: 0; }
   .layout { flex-direction: column; }
 }
+
+/* ------------------------------------------- governance dashboard (TZ 3.0 10) */
+
+.score-block {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.score-gauge-wrap { text-align: center; }
+.cap-badge {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--sev-critical);
+  border: 1px solid var(--sev-critical);
+  border-radius: 10px;
+}
+.score-comps {
+  flex: 1 1 320px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.score-comp { display: flex; align-items: center; gap: 8px; }
+.score-comp-name { flex: 0 0 220px; font-size: 12px; color: var(--text-muted); }
+.score-comp-bar {
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.score-comp-fill { display: block; height: 100%; }
+.score-comp-val { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); }
+
+.env-card { margin-bottom: 12px; }
+.env-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.env-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.hist-chart {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 12px;
+}
+.hist-scan-row.hist-sel {
+  outline: 2px solid var(--accent);
+  background: var(--accent-dim);
+}
+.hist-regs { margin: 4px 0 12px 18px; }
+.hist-regs li { margin: 2px 0; }
+.hist-diff-list { margin: 4px 0 12px 18px; }
+.hist-diff-list li { margin: 2px 0; }

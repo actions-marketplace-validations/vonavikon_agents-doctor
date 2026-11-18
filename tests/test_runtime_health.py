@@ -6,6 +6,7 @@ are mocked everywhere a binary probe could fire. The real system facts
 used are the interpreter itself (RT-PY, which the scanner requires
 anyway) and temp-directory fixtures.
 """
+import json
 import os
 import subprocess
 import sys
@@ -60,7 +61,9 @@ class TestReportShape(RuntimeHealthCase):
         ids = [c['id'] for c in report['checks']]
         self.assertEqual(len(ids), len(set(ids)), 'ids must be unique')
         for mandatory in ('RT-PY', 'RT-GIT', 'RT-MCP-CONFIG',
-                          'RT-PATH', 'RT-LOCK-DIR'):
+                          'RT-PATH', 'RT-LOCK-DIR', 'RT-SKILLS-VERSIONS',
+                          'RT-SKILLS-CONFLICTS', 'RT-PLUGIN-FRESHNESS',
+                          'RT-MCP-COMMANDS', 'RT-CONFIG-VALIDITY'):
             self.assertIn(mandatory, ids)
         for check in report['checks']:
             self.assertEqual(set(check),
@@ -368,6 +371,328 @@ class TestLockDir(RuntimeHealthCase):
         (run_dir / 'manifest.json').write_text('{}', encoding='utf-8')
         check = runtime_health._check_lock_dir(self.ctx())
         self.assertEqual(check['status'], 'pass')
+
+
+class TestSkillsVersions(RuntimeHealthCase):
+    def _detect_zcode(self):
+        # .agents is a zcode project marker
+        (self.root / '.agents').mkdir()
+
+    def _skill(self, base, name, files):
+        skill = base / name
+        skill.mkdir(parents=True)
+        for fname, text in files.items():
+            (skill / fname).write_text(text, encoding='utf-8')
+        return skill
+
+    def test_not_applicable_without_detected_harnesses(self):
+        report = self.run_env()
+        self.assertEqual(_by_id(report, 'RT-SKILLS-VERSIONS')['status'],
+                         'not_applicable')
+
+    def test_version_from_plugin_json(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'alpha',
+                    {'plugin.json':
+                     '{"name": "alpha", "version": "1.2.3"}'})
+        report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        self.assertEqual(check['status'], 'pass')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('alpha', joined)
+        self.assertIn('1.2.3', joined)
+        self.assertIn('plugin.json', joined)
+
+    def test_package_json_used_when_no_plugin_json(self):
+        self._detect_zcode()
+        self._skill(self.home / '.zcode' / 'skills', 'beta',
+                    {'package.json': '{"version": "0.9.0"}'})
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        self.assertEqual(check['status'], 'pass')
+        self.assertTrue(any('beta' in e and '0.9.0' in e
+                            and 'package.json' in e
+                            for e in check['evidence']))
+
+    def test_version_from_skill_md_frontmatter(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'gamma',
+                    {'SKILL.md': '---\nname: gamma\nversion: 2.0.0\n'
+                                 'description: x\n---\n\nbody\n'})
+        report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        self.assertEqual(check['status'], 'pass')
+        self.assertTrue(any('gamma' in e and '2.0.0' in e
+                            and 'SKILL.md' in e
+                            for e in check['evidence']))
+
+    def test_skill_without_version_is_listed_as_such(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'bare',
+                    {'SKILL.md': '---\nname: bare\ndescription: x\n'
+                                 '---\n\nbody\n'})
+        report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        self.assertEqual(check['status'], 'pass')
+        self.assertTrue(any('bare' in e and 'no version' in e
+                            for e in check['evidence']))
+        self.assertIn('without', check['detail'])
+
+    def test_container_directories_are_skipped(self):
+        # children of a skills location that have none of
+        # SKILL.md/plugin.json/package.json are containers (the
+        # marketplace level of a plugin cache), not skills
+        self._detect_zcode()
+        skills = self.root / '.agents' / 'skills'
+        self._skill(skills, 'real',
+                    {'SKILL.md': '---\nname: real\n---\n'})
+        (skills / 'not-a-skill').mkdir()
+        (skills / 'not-a-skill' / 'README.md').write_text('x',
+                                                          encoding='utf-8')
+        market = (self.home / '.zcode' / 'cli' / 'plugins' / 'cache'
+                  / 'some-market')
+        market.mkdir(parents=True)
+        (market / 'some-plugin').mkdir()
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('real', joined)
+        self.assertNotIn('not-a-skill', joined)
+        self.assertNotIn('some-market', joined)
+        self.assertNotIn('some-plugin', joined)
+
+    def test_inventory_capped_at_limit(self):
+        self._detect_zcode()
+        skills = self.root / '.agents' / 'skills'
+        for i in range(runtime_health.SKILLS_INVENTORY_CAP + 50):
+            self._skill(skills, 'skill-%03d' % i,
+                        {'plugin.json': '{"version": "1.0.%d"}' % i})
+        report = self.run_env()
+        check = _by_id(report, 'RT-SKILLS-VERSIONS')
+        self.assertEqual(check['status'], 'pass')
+        self.assertEqual(len(check['evidence']),
+                         runtime_health.SKILLS_INVENTORY_CAP)
+        self.assertIn('capped', check['detail'])
+
+
+class TestSkillsConflicts(RuntimeHealthCase):
+    def _detect_zcode(self):
+        (self.root / '.agents').mkdir()
+
+    def _skill(self, base, name, version):
+        skill = base / name
+        skill.mkdir(parents=True)
+        if version is None:
+            (skill / 'SKILL.md').write_text(
+                '---\nname: %s\ndescription: x\n---\n' % name,
+                encoding='utf-8')
+        else:
+            (skill / 'plugin.json').write_text(
+                '{"version": "%s"}' % version, encoding='utf-8')
+
+    def _conflicts(self, report):
+        return _by_id(report, 'RT-SKILLS-CONFLICTS')
+
+    def test_conflicting_versions_warn(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'foo', '1.0.0')
+        self._skill(self.home / '.zcode' / 'skills', 'foo', '1.1.0')
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = self._conflicts(report)
+        self.assertEqual(check['status'], 'warn')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('foo', joined)
+        self.assertIn('1.0.0', joined)
+        self.assertIn('1.1.0', joined)
+
+    def test_same_version_in_two_locations_passes(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'foo', '1.0.0')
+        self._skill(self.home / '.zcode' / 'skills', 'foo', '1.0.0')
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = self._conflicts(report)
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn('same', check['detail'])
+        self.assertTrue(any('foo' in e for e in check['evidence']))
+
+    def test_unknown_version_is_not_a_conflict(self):
+        # None + 1.0.0 across locations is a note, not a verdict:
+        # an unknown version is not a *different* version
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'foo', '1.0.0')
+        self._skill(self.home / '.zcode' / 'skills', 'foo', None)
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = self._conflicts(report)
+        self.assertEqual(check['status'], 'pass')
+
+    def test_single_location_passes(self):
+        self._detect_zcode()
+        self._skill(self.root / '.agents' / 'skills', 'solo', '1.0.0')
+        report = self.run_env()
+        check = self._conflicts(report)
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn('no skill name appears', check['detail'])
+
+    def test_not_applicable_without_skills(self):
+        self._detect_zcode()
+        report = self.run_env()
+        self.assertEqual(_by_id(report, 'RT-SKILLS-CONFLICTS')['status'],
+                         'not_applicable')
+
+
+class TestPluginFreshness(RuntimeHealthCase):
+    def _plug(self, harness_parts, market, plugin):
+        plug = self.home.joinpath(*harness_parts, market, plugin)
+        plug.mkdir(parents=True)
+        return plug
+
+    def test_not_applicable_without_cache(self):
+        check = runtime_health._check_plugin_freshness(self.home)
+        self.assertEqual(check['status'], 'not_applicable')
+        self.assertIn('plugin cache', check['detail'])
+
+    def test_empty_cache_not_applicable(self):
+        (self.home / '.zcode' / 'cli' / 'plugins' / 'cache').mkdir(
+            parents=True)
+        check = runtime_health._check_plugin_freshness(self.home)
+        self.assertEqual(check['status'], 'not_applicable')
+
+    def test_fresh_plugins_pass(self):
+        self._plug(('.zcode', 'cli', 'plugins', 'cache'), 'm1', 'a')
+        self._plug(('.claude', 'plugins', 'cache'), 'm2', 'b')
+        check = runtime_health._check_plugin_freshness(self.home)
+        self.assertEqual(check['status'], 'pass')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('within the last %d days'
+                      % runtime_health.PLUGIN_FRESHNESS_DAYS, joined)
+
+    def test_old_plugin_is_informational_not_warn(self):
+        plug = self._plug(('.zcode', 'cli', 'plugins', 'cache'), 'm1',
+                          'ancient')
+        age_days = runtime_health.PLUGIN_FRESHNESS_DAYS + 20
+        old = time.time() - age_days * 86400
+        os.utime(plug, (old, old))
+        check = runtime_health._check_plugin_freshness(self.home)
+        # a plugin is under no obligation to update: never a warn
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn('informational', check['detail'])
+        self.assertTrue(any('ancient' in e and 'days since last change'
+                            in e for e in check['evidence']))
+
+
+class TestMcpCommands(RuntimeHealthCase):
+    def _write_mcp(self, servers):
+        (self.root / '.mcp.json').write_text(
+            json.dumps({'mcpServers': servers}), encoding='utf-8')
+
+    def test_not_applicable_without_servers(self):
+        report = self.run_env()
+        self.assertEqual(_by_id(report, 'RT-MCP-COMMANDS')['status'],
+                         'not_applicable')
+
+    def test_command_on_path_passes(self):
+        self._write_mcp({'srv': {'command': 'npx -y @scope/server-x',
+                                 'args': ['--flag']}})
+        fake = 'X:/fake/npx.cmd'
+        with mock.patch('runtime_health.shutil.which',
+                        return_value=fake) as which:
+            report = self.run_env()
+        check = _by_id(report, 'RT-MCP-COMMANDS')
+        self.assertEqual(check['status'], 'pass')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('srv', joined)
+        self.assertIn(fake, joined)
+        # only the command token is looked up, never its arguments
+        probed = [c[0][0] for c in which.call_args_list]
+        self.assertIn('npx', probed)
+        self.assertNotIn('-y', probed)
+        self.assertNotIn('@scope/server-x', probed)
+
+    def test_missing_command_warns(self):
+        self._write_mcp({'srv': {'command': 'no-such-bin-9x'}})
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = _by_id(report, 'RT-MCP-COMMANDS')
+        self.assertEqual(check['status'], 'warn')
+        self.assertTrue(any("'no-such-bin-9x' not found on PATH" in e
+                            for e in check['evidence']))
+
+    def test_whitespace_command_warns(self):
+        self._write_mcp({'srv': {'command': '   '}})
+        with mock.patch('runtime_health.shutil.which', return_value=None):
+            report = self.run_env()
+        check = _by_id(report, 'RT-MCP-COMMANDS')
+        self.assertEqual(check['status'], 'warn')
+        self.assertTrue(any('empty command' in e
+                            for e in check['evidence']))
+
+    def test_http_only_servers_not_applicable(self):
+        self._write_mcp({'weather': {'url': 'https://example.com/mcp'}})
+        report = self.run_env()
+        check = _by_id(report, 'RT-MCP-COMMANDS')
+        self.assertEqual(check['status'], 'not_applicable')
+        self.assertTrue(any('http transport' in e
+                            for e in check['evidence']))
+
+    def test_env_values_never_reach_the_report(self):
+        canary = 'sk-CANARY-runtime-9f3a'
+        self._write_mcp({'srv': {'command': 'npx',
+                                 'env': {'API_TOKEN': canary}}})
+        with mock.patch('runtime_health.shutil.which',
+                        return_value='X:/fake/npx.cmd'):
+            report = self.run_env()
+        dumped = json.dumps(report)
+        self.assertNotIn(canary, dumped)
+        self.assertNotIn('API_TOKEN', dumped)
+
+
+class TestConfigValidity(RuntimeHealthCase):
+    def test_not_applicable_without_detected_harnesses(self):
+        report = self.run_env()
+        self.assertEqual(_by_id(report, 'RT-CONFIG-VALIDITY')['status'],
+                         'not_applicable')
+
+    def test_invalid_json_fails(self):
+        zdir = self.root / '.zcode'
+        zdir.mkdir()
+        (zdir / 'config.json').write_text('{not json', encoding='utf-8')
+        report = self.run_env()
+        check = _by_id(report, 'RT-CONFIG-VALIDITY')
+        self.assertEqual(check['status'], 'fail')
+        joined = '\n'.join(check['evidence'])
+        self.assertIn('config.json', joined)
+        self.assertIn('invalid JSON', joined)
+
+    def test_valid_configs_pass(self):
+        zdir = self.root / '.zcode'
+        zdir.mkdir()
+        (zdir / 'config.json').write_text(
+            '{"mcp": {"servers": {}}}', encoding='utf-8')
+        report = self.run_env()
+        check = _by_id(report, 'RT-CONFIG-VALIDITY')
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn('parse cleanly', check['detail'])
+
+    def test_invalid_toml(self):
+        cdir = self.root / '.codex'
+        cdir.mkdir()
+        (cdir / 'config.toml').write_text('broken = [', encoding='utf-8')
+        report = self.run_env()
+        check = _by_id(report, 'RT-CONFIG-VALIDITY')
+        expected = 'fail' if runtime_health.tomllib else 'unknown'
+        self.assertEqual(check['status'], expected)
+
+    def test_detected_without_config_files_passes(self):
+        (self.root / 'AGENTS.md').write_text('rules', encoding='utf-8')
+        report = self.run_env()
+        check = _by_id(report, 'RT-CONFIG-VALIDITY')
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn('no config files', check['detail'])
 
 
 if __name__ == '__main__':

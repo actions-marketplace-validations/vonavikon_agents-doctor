@@ -159,10 +159,18 @@ class Unsupported(RemediateCase):
         with self.assertRaises(remediate.UnsupportedError) as cm:
             remediate.plan(rep, 'SEC-001')           # exists: no-prevention warn
         self.assertIn('SEC-001', str(cm.exception))
-        rul = self.fid_for(rep, 'missing.md')        # dead link: manual fix
+        # dead links used to be the unsupported example; since the ТЗ 9.3
+        # remediation stage they plan manual fix_dead_link steps instead
+        # (covered in tests/test_remediation_v3.py), so the unsupported
+        # case here is a finding type with no fix at all
+        fabricated = {'root': str(self.ws), 'findings_detailed': [{
+            'fid': 'RUL-099', 'gate': 'G3', 'category': 'rules',
+            'severity': 'low', 'status': 'warn',
+            'title': 'Two rule sources at .', 'description': 'fabricated',
+            'evidence': [{'path': '.'}], 'recommendation': 'by hand'}]}
         with self.assertRaises(remediate.UnsupportedError) as cm:
-            remediate.plan(rep, rul)
-        self.assertIn(rul, str(cm.exception))
+            remediate.plan(fabricated, 'RUL-099')
+        self.assertIn('RUL-099', str(cm.exception))
 
     def test_unknown_fid_raises(self):
         rep = self.scan()

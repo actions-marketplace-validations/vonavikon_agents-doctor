@@ -170,6 +170,8 @@ const state = {
   simulate: { result: null, harness: '' },
   instructions: null,
   compare: null,
+  score: null,                 // /api/score cache (null until fetched)
+  hist: { data: null, trend: null, sel: [], diff: null },  // History tab
   inspector: { path: null, line: null },
   history: { stack: [], idx: -1 },
 };
@@ -219,7 +221,7 @@ function onGlobalFilterChange() {
 
 /* ------------------------------------------------------------------- tabs */
 
-const TABS = ['overview', 'tree', 'treemap', 'instructions', 'findings', 'simulate', 'compare'];
+const TABS = ['overview', 'tree', 'treemap', 'instructions', 'findings', 'simulate', 'compare', 'history'];
 const initedTabs = new Set();
 
 function switchTab(name) {
@@ -238,6 +240,7 @@ function switchTab(name) {
     if (name === 'findings') initFindings();
     if (name === 'simulate') initSimulate();
     if (name === 'compare') initCompare();
+    if (name === 'history') initHistoryTab();
   }
 }
 
@@ -251,6 +254,8 @@ async function loadOverview() {
     renderMeta();
     renderChips();
     renderOverview();
+    loadScoreBlock();   // async: fills #ov-score when /api/score answers
+    loadEnvSummary();   // async: fills #ov-env from /api/harnesses
   } catch (e) {
     body.textContent = '';
     body.append(errorPanel(e, loadOverview));
@@ -285,6 +290,14 @@ function renderOverview() {
   addBox('gates fail', gates.filter((g) => g.status === 'fail').length);
   addBox('gates warn', gates.filter((g) => g.status === 'warn').length);
   body.append(boxes);
+
+  // Governance dashboard blocks (TZ 3.0 section 10): health score and
+  // detected environments. Containers are filled synchronously from the
+  // caches when present; the async loaders overwrite them on answer.
+  body.append(el('div', { id: 'ov-score' }));
+  body.append(el('div', { id: 'ov-env' }));
+  renderScoreBlock();
+  renderEnvSummary();
 
   const stLine = el('p', { class: 'conf-note' });
   const parts = [];
@@ -2577,6 +2590,389 @@ function renderCompare(cmp, currentFindings) {
   }
 }
 
+/* ------------------------------------------- health score (TZ 3.0, 10.3) */
+
+function scoreColor(v) {
+  if (v == null) return '#646b78';
+  if (v >= 80) return '#46ad6e';
+  if (v >= 60) return '#e08b28';
+  return '#e5534b';
+}
+
+function scoreGaugeSvg(score) {
+  const R = 46;
+  const C = 2 * Math.PI * R;
+  const frac = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Workspace Health Score ${score == null ? 'unknown' : score + ' of 100'}" class="score-gauge">`;
+  s += '<title>Workspace Health Score</title>';
+  s += `<circle cx="60" cy="60" r="${R}" fill="none" stroke="#3a4150" stroke-width="10"/>`;
+  if (score != null) {
+    s += `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${scoreColor(score)}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(C * frac).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>`;
+  }
+  s += `<text x="60" y="57" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-size="26" fill="#d6d9e0">${score == null ? '?' : Math.round(score)}</text>`;
+  s += `<text x="60" y="76" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-size="10" fill="#8b919d">/ 100</text>`;
+  s += '</svg>';
+  return s;
+}
+
+async function loadScoreBlock() {
+  try {
+    state.score = await api('/api/score');
+  } catch (e) {
+    state.score = { error: e.message };
+  }
+  renderScoreBlock();
+}
+
+function renderScoreBlock() {
+  const box = $('ov-score');
+  if (!box) return;
+  box.textContent = '';
+  box.append(el('div', { class: 'ov-section-title', text: 'Workspace Health Score' }));
+  if (!state.score) {
+    box.append(el('div', { class: 'loading', html: loadingHTML('Loading score…') }));
+    return;
+  }
+  if (state.score.error) {
+    box.append(el('div', { class: 'empty-state', text: 'Health Score unavailable: ' + state.score.error }));
+    return;
+  }
+  const sc = state.score;
+  const wrap = el('div', { class: 'score-block' });
+  const gauge = el('div', { class: 'score-gauge-wrap' });
+  gauge.append(el('div', { html: scoreGaugeSvg(sc.score) }));
+  if (sc.critical_cap) {
+    gauge.append(el('span', {
+      class: 'cap-badge',
+      title: 'a failing critical finding caps the total at 40 regardless of the component scores',
+      text: 'critical cap 40',
+    }));
+  }
+  wrap.append(gauge);
+  const comps = el('div', { class: 'score-comps' });
+  for (const [name, c] of Object.entries(sc.components || {})) {
+    const row = el('div', { class: 'score-comp' });
+    row.append(el('span', {
+      class: 'score-comp-name',
+      text: name + (c.gates && c.gates.length ? ' (' + c.gates.join(', ') + ')' : ' (history)'),
+    }));
+    const bar = el('span', { class: 'score-comp-bar' });
+    if (c.score != null) {
+      bar.append(el('span', {
+        class: 'score-comp-fill',
+        style: `width:${Math.max(0, Math.min(100, c.score))}%; background:${scoreColor(c.score)}`,
+      }));
+    }
+    row.append(bar);
+    row.append(el('span', {
+      class: 'score-comp-val mono',
+      text: c.score == null ? 'no data' : `${c.score} · w ${c.weight}`,
+    }));
+    comps.append(row);
+  }
+  wrap.append(comps);
+  if (sc.score == null && sc.note) {
+    wrap.append(el('div', { class: 'conf-note', text: sc.note }));
+  }
+  wrap.append(el('div', {
+    class: 'conf-note',
+    text: 'formula: ' + (sc.formula || '?') + ' · computed ' + (sc.computed_at || '?') +
+      (sc.history_available ? ' · history on' : ' · no history: observability 0'),
+  }));
+  box.append(wrap);
+}
+
+/* -------------------------------------------------- detected environments */
+
+async function loadEnvSummary() {
+  try {
+    await ensureHarnessOptions();
+  } catch { /* the card below shows what it has */ }
+  renderEnvSummary();
+}
+
+function renderEnvSummary() {
+  const box = $('ov-env');
+  if (!box) return;
+  box.textContent = '';
+  const h = state.harnesses || {};
+  const matrix = h.spec_matrix || [];
+  const names = new Map(matrix.map((m) => [m.harness_id, m.display_name || m.harness_id]));
+  const detected = (h.detected || []).filter((d) => d && d.status && d.status !== 'not_detected');
+  const card = el('div', { class: 'env-card' });
+  card.append(el('div', { class: 'ov-section-title', text: 'Detected environments' }));
+  const line = el('div', { class: 'env-chips' });
+  if (!detected.length) {
+    line.append(el('span', { class: 'conf-note', text: 'no agent environments detected in this workspace' }));
+  } else {
+    for (const d of detected) {
+      line.append(el('span', {
+        class: 'env-chip',
+        title: 'status: ' + d.status +
+          (d.version ? ' · version ' + d.version : '') +
+          (d.confidence != null ? ' · confidence ' + Number(d.confidence).toFixed(2) : ''),
+        text: (names.get(d.harness) || d.harness || '?') + (d.version ? ' ' + d.version : ''),
+      }));
+    }
+    line.append(el('span', {
+      class: 'conf-note',
+      text: `${detected.length} of ${Math.max(matrix.length, detected.length)} known environments`,
+    }));
+  }
+  card.append(line);
+  box.append(card);
+}
+
+/* ------------------------------------------- history tab (TZ 3.0, 10.x) */
+
+const HIST_DIFF_CAP = 10;   // list entries per diff section
+
+function rootParam() {
+  return state.overview && state.overview.root ? String(state.overview.root) : '';
+}
+
+async function initHistoryTab() {
+  const body = $('history-body');
+  body.innerHTML = loadingHTML('Loading audit history…');
+  const params = { root: rootParam() };
+  try {
+    const [hist, trend] = await Promise.all([
+      api('/api/history', params),
+      api('/api/trend', params).catch(() => ({ available: false, points: [] })),
+    ]);
+    state.hist.data = hist;
+    state.hist.trend = trend;
+    state.hist.sel = [];
+    state.hist.diff = null;
+    renderHistoryTab();
+  } catch (e) {
+    body.textContent = '';
+    body.append(errorPanel(e, initHistoryTab));
+  }
+}
+
+function renderHistoryTab() {
+  const body = $('history-body');
+  body.textContent = '';
+  const data = state.hist.data;
+  if (!data || !data.available || !(data.scans || []).length) {
+    const box = el('div', { class: 'empty-state' });
+    box.append(el('p', { text: data && data.error ? data.error : 'No audit history recorded in this workspace yet.' }));
+    box.append(el('p', { text: 'Every successful audit records itself into <root>/.agents-doctor/history.db. Run one:' }));
+    box.append(el('code', { class: 'fix-cmd', text: 'python skills/agents-doctor/scripts/agents_doctor.py audit <root>' }));
+    box.append(el('p', { text: 'or record an existing scan report:' }));
+    box.append(el('code', { class: 'fix-cmd', text: 'python skills/agents-doctor/scripts/agents_doctor.py history <root> --record scan.json' }));
+    body.append(box);
+    return;
+  }
+
+  body.append(el('div', { class: 'ov-section-title', text: 'Findings over time' }));
+  const points = (state.hist.trend && state.hist.trend.points) || [];
+  if (points.length) {
+    body.append(el('div', { class: 'hist-chart', html: trendSvg(points) }));
+  } else {
+    body.append(el('div', {
+      class: 'empty-state',
+      text: 'No trend points for this root (the database exists but holds no scans of the audited root).',
+    }));
+  }
+
+  body.append(el('div', { class: 'ov-section-title', text: 'Recorded scans' }));
+  body.append(el('p', {
+    class: 'conf-note',
+    text: `Click two rows to diff them (before \u2192 after). ${data.scans.length} scan(s), newest first.`,
+  }));
+  body.append(buildScansTable(data.scans));
+
+  body.append(el('div', { class: 'ov-section-title', text: 'Regressions in the newest scan' }));
+  const regs = data.regressions || [];
+  if (!regs.length) {
+    body.append(el('div', { class: 'empty-state', text: 'None: nothing got worse compared to the previous scan of this root.' }));
+  } else {
+    const ul = el('ul', { class: 'hist-regs' });
+    for (const r of regs) {
+      const li = el('li', {});
+      li.append(el('span', {
+        class: 'mono',
+        text: (r.check_id || r.fid || '?') + (r.harness ? ' @' + r.harness : '') + ' [' + (r.gate || '?') + ']',
+      }));
+      li.append(el('span', { class: 'mono subtle', text: '  ' + (r.reasons || []).join('; ') }));
+      ul.append(li);
+    }
+    body.append(ul);
+  }
+
+  body.append(el('div', { id: 'hist-diff' }));
+  renderHistoryDiff();
+}
+
+function buildScansTable(scans) {
+  const table = el('table', { class: 'tbl', 'aria-label': 'Recorded scans' });
+  table.append(el('thead', {}, el('tr', {},
+    el('th', { text: 'id' }), el('th', { text: 'Date' }),
+    el('th', { class: 'num', text: 'Total' }),
+    el('th', { class: 'num', text: 'Critical' }),
+    el('th', { class: 'num', text: 'High' }))));
+  const tbody = el('tbody');
+  for (const s of scans) {
+    const sev = s.severity_counts || {};
+    const tr = el('tr', {
+      class: 'row-click hist-scan-row',
+      'data-scan': String(s.id),
+      'aria-selected': 'false',
+      tabindex: '0',
+      title: 'Select for diff (pick two rows)',
+    });
+    tr.append(
+      el('td', { class: 'mono', text: String(s.id) }),
+      el('td', { class: 'mono', text: s.ts || '?' }),
+      el('td', { class: 'num', text: s.findings_total != null ? String(s.findings_total) : '?' }),
+      el('td', { class: 'num', text: String(sev.critical || 0) }),
+      el('td', { class: 'num', text: String(sev.high || 0) }),
+    );
+    const activate = () => toggleScanSel(s.id);
+    tr.addEventListener('click', activate);
+    tr.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); activate(); }
+    });
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  return table;
+}
+
+function toggleScanSel(id) {
+  const sel = state.hist.sel;
+  const i = sel.indexOf(id);
+  if (i >= 0) sel.splice(i, 1);
+  else {
+    sel.push(id);
+    if (sel.length > 2) sel.shift();
+  }
+  state.hist.diff = null;
+  for (const row of $('history-body').querySelectorAll('.hist-scan-row')) {
+    const sid = Number(row.getAttribute('data-scan'));
+    const on = sel.includes(sid);
+    row.classList.toggle('hist-sel', on);
+    row.setAttribute('aria-selected', String(on));
+  }
+  renderHistoryDiff();
+}
+
+async function renderHistoryDiff() {
+  const box = $('hist-diff');
+  if (!box) return;
+  box.textContent = '';
+  const sel = state.hist.sel;
+  if (sel.length < 2) {
+    if (sel.length === 1) {
+      box.append(el('p', { class: 'conf-note', text: 'One scan selected — click one more row to diff.' }));
+    }
+    return;
+  }
+  const [oldId, newId] = sel;
+  box.append(el('div', { class: 'ov-section-title', text: `Diff: scan ${oldId} \u2192 scan ${newId}` }));
+  const holder = el('div', {});
+  box.append(holder);
+  holder.innerHTML = loadingHTML('Loading diff…');
+  let data;
+  try {
+    data = await api('/api/diff', { root: rootParam(), old: String(oldId), new: String(newId) });
+  } catch (e) {
+    holder.textContent = '';
+    holder.append(el('div', { class: 'empty-state', text: 'Diff failed: ' + e.message }));
+    return;
+  }
+  if (state.hist.sel[0] !== oldId || state.hist.sel[1] !== newId) return;  // selection moved on
+  holder.textContent = '';
+  if (!data.supported) {
+    holder.append(el('div', { class: 'empty-state', text: data.error || 'diff unavailable' }));
+    return;
+  }
+  state.hist.diff = data;
+  const chips = el('div', { class: 'ov-stats' });
+  for (const sec of HIST_DIFF_SECTIONS) {
+    chips.append(el('div', { class: 'stat-box', title: sec.hint },
+      el('div', { class: 'stat-key', text: sec.label }),
+      el('div', { class: 'stat-val', text: String((data.summary || {})[sec.key] || 0) })));
+  }
+  holder.append(chips);
+  const diff = data.diff || {};
+  for (const sec of HIST_DIFF_SECTIONS) {
+    const entries = diff[sec.key] || [];
+    holder.append(el('div', { class: 'ov-section-title', text: `${sec.label} (${entries.length}) — ${sec.hint}` }));
+    if (!entries.length) {
+      holder.append(el('div', { class: 'empty-state', text: 'None.' }));
+      continue;
+    }
+    const ul = el('ul', { class: 'hist-diff-list' });
+    for (const f of entries.slice(0, HIST_DIFF_CAP)) {
+      ul.append(el('li', {
+        class: 'mono subtle',
+        text: (f.section || '?') + '  ' + String(f.path || '?').replace(/\\/g, '/'),
+      }));
+    }
+    holder.append(ul);
+    if (entries.length > HIST_DIFF_CAP) {
+      holder.append(el('div', { class: 'conf-note', text: `+${entries.length - HIST_DIFF_CAP} more not shown` }));
+    }
+  }
+}
+
+const HIST_DIFF_SECTIONS = [
+  { key: 'new', label: 'NEW', hint: 'fingerprints that appeared in the newer scan' },
+  { key: 'resolved', label: 'RESOLVED', hint: 'fingerprints of the older scan no longer present' },
+  { key: 'changed', label: 'CHANGED', hint: 'same section+path, reshaped fingerprint (also counted as new)' },
+];
+
+/** Findings-per-scan chart: SVG polyline, one point per scan, x scaled
+    by scan time, separate lines for total / critical / high. */
+function trendSvg(points) {
+  const W = 760, H = 220, L = 44, Rp = 12, T = 14, B = 34;
+  const iw = W - L - Rp, ih = H - T - B;
+  const ts = points.map((p) => Date.parse(p.ts));
+  const t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const x = (i) => (t1 === t0 ? L + iw / 2 : L + iw * (ts[i] - t0) / (t1 - t0));
+  const maxV = Math.max(1, ...points.map((p) => Number(p.total) || 0));
+  const y = (v) => T + ih * (1 - v / maxV);
+  const line = (key) => points.map((p, i) => `${x(i).toFixed(1)},${y(Number(p[key]) || 0).toFixed(1)}`).join(' ');
+  const INK = '#d6d9e0', MUT = '#8b919d', GRID = '#2d323d';
+  const series = [
+    { key: 'total', color: '#5289c7' },
+    { key: 'critical', color: '#e5534b' },
+    { key: 'high', color: '#e08b28' },
+  ];
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Findings over time, ${points.length} scans" class="trend-svg">`;
+  s += '<title>Findings per scan</title>';
+  for (const frac of [0, 0.5, 1]) {
+    const gy = (T + ih * (1 - frac)).toFixed(1);
+    s += `<line x1="${L}" y1="${gy}" x2="${W - Rp}" y2="${gy}" stroke="${GRID}" stroke-width="1"/>`;
+    s += `<text x="${L - 6}" y="${Number(gy) + 4}" text-anchor="end" font-family="ui-monospace,Consolas,monospace" font-size="10" fill="${MUT}">${Math.round(maxV * frac)}</text>`;
+  }
+  for (const sr of series) {
+    s += `<polyline points="${line(sr.key)}" fill="none" stroke="${sr.color}" stroke-width="1.6"/>`;
+  }
+  points.forEach((p, i) => {
+    for (const sr of series) {
+      s += `<circle cx="${x(i).toFixed(1)}" cy="${y(Number(p[sr.key]) || 0).toFixed(1)}" r="2.6" fill="${sr.color}"><title>${esc(p.ts || '?')}: ${sr.key} ${p[sr.key] || 0} (total ${p.total || 0})</title></circle>`;
+    }
+  });
+  const xlbl = (i, anchor) => {
+    s += `<text x="${x(i).toFixed(1)}" y="${H - 10}" text-anchor="${anchor}" font-family="ui-monospace,Consolas,monospace" font-size="10" fill="${MUT}">${esc(String(points[i].ts || '').slice(0, 10))}</text>`;
+  };
+  xlbl(0, 'start');
+  if (points.length > 2) xlbl(Math.floor((points.length - 1) / 2), 'middle');
+  if (points.length > 1) xlbl(points.length - 1, 'end');
+  let lx = L + 4;
+  for (const sr of series) {
+    s += `<line x1="${lx}" y1="${T - 4}" x2="${lx + 14}" y2="${T - 4}" stroke="${sr.color}" stroke-width="2"/>`;
+    s += `<text x="${lx + 18}" y="${T - 1}" font-family="ui-monospace,Consolas,monospace" font-size="10" fill="${INK}">${sr.key}</text>`;
+    lx += 30 + sr.key.length * 6;
+  }
+  s += '</svg>';
+  return s;
+}
+
 /* ----------------------------------------------------------------- rescan */
 
 async function rescan() {
@@ -2602,9 +2998,15 @@ async function rescan() {
     state.simulate.result = null;
     state.instructions = null;
     state.compare = null;
+    state.score = null;          // health score refetches with the overview
+    state.hist.data = null;      // history tab reloads on next open
+    state.hist.trend = null;
+    state.hist.sel = [];
+    state.hist.diff = null;
     initedTabs.delete('instructions');
     initedTabs.delete('simulate');
     initedTabs.delete('compare');
+    initedTabs.delete('history');
     await loadOverview();
     state.harnesses = null;
     await ensureHarnessOptions();
@@ -2618,6 +3020,7 @@ async function rescan() {
     else if (state.tab === 'instructions') initInstructions();
     else if (state.tab === 'findings' && state.findings.loadedOnce) loadFindings();
     else if (state.tab === 'compare') initCompare();
+    else if (state.tab === 'history') initHistoryTab();
     else if (state.tab === 'simulate') {
       $('simulate-body').innerHTML = emptyHTML('Scan changed after rescan — press Run to simulate again.');
     }

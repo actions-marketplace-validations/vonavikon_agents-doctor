@@ -22,6 +22,7 @@
     <button class="tab" id="tab-findings"  data-tab="findings"  role="tab" aria-selected="false">Findings</button>
     <button class="tab" id="tab-simulate" data-tab="simulate" role="tab" aria-selected="false">Simulate</button>
     <button class="tab" id="tab-compare"  data-tab="compare"  role="tab" aria-selected="false">Compare</button>
+    <button class="tab" id="tab-history"  data-tab="history"  role="tab" aria-selected="false">History</button>
   </nav>
 
   <div class="topbar-actions">
@@ -169,6 +170,19 @@
     </div>
     <div class="panel-body" id="findings-body">
       <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading findings…</div>
+    </div>
+  </section>
+
+  <!-- History (Governance Dashboard, TZ 3.0 section 10) -->
+  <section class="panel tab-panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="panel-header">
+      <div class="toolbar">
+        <span class="toolbar-label">Audit history: findings over time, recorded scans, diff between two scans.</span>
+        <span class="formula mono grow" id="hist-count" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="panel-body" id="history-body">
+      <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading history…</div>
     </div>
   </section>
 

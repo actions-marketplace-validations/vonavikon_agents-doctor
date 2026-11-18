@@ -57,10 +57,34 @@ the before/after report.
 Harness-aware fixes (ТЗ 13.3): findings raised by harness adapters
 carry a stable check_id; CHECK_ID_FIXES maps the supported ones to a
 plan. CLAUDE_LOCAL_DEPRECATED moves the file into the trash run
-(autofix), CURSOR_LEGACY_AND_RULES / WINDSURF_LEGACY_AND_RULES get a
-manual-migration plan (autofix_available=False, nothing executes). A
-check_id without a registry entry is UnsupportedError, like every
-unsupported finding.
+(autofix, risk review: the file may hold something worth merging
+first), CURSOR_LEGACY_AND_RULES / WINDSURF_LEGACY_AND_RULES and
+INSTR_DUPLICATION get display-only plans (autofix_available=False,
+nothing executes). A check_id without a registry entry is
+UnsupportedError, like every unsupported finding.
+
+Risk levels (ТЗ 9.3): every step carries risk 'safe' | 'review' |
+'high' | 'manual'. Steps without a risk field are 'safe' (plans from
+older callers keep working). safe steps run after the single global
+'yes'; review and high steps additionally ask per step
+("step N risk=REVIEW: <target> -- apply this step? [yes/no]"; a 'no'
+or EOF skips the step with reason 'declined-risk'); manual steps are
+advice only and never execute (recorded skipped, reason 'manual').
+New step types: fix_dead_link (manual: the reference is checked or
+removed by hand, the md text is never rewritten automatically),
+normalize_config (review: a JSON file with duplicate keys is rewritten
+keeping the FIRST occurrence of every key and indent 2; the original
+lands in the trash run as the backup; an mtime/size drift between plan
+and apply skips the step as changed), dedupe_instructions (manual:
+which blocks repeat in which files, extract-them-once advice) and
+context_tax_hint (manual: shrink advice for an oversized instruction
+file).
+
+Operation journal (ТЗ 9.4): every apply appends one line to
+<root>/.agents-doctor/operations.jsonl -- {ts, fid, check_id, root,
+steps: [{action, target, risk, result}]} -- paths and verdicts only,
+never file contents, so no secret can leak into it. Journal failures
+print a warning and never fail the apply.
 
 Concurrency and crash recovery (ТЗ 16): apply_plan runs under the
 trash lock (.agents-doctor-trash/.lock, O_EXCL) and refuses cleanly
@@ -80,6 +104,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -103,7 +128,26 @@ SKIPPED = 'skipped'
 CHANGED = 'changed'
 MANUAL = 'manual'
 
+# --- risk levels (ТЗ 9.3) ---------------------------------------------------------
+
+RISK_SAFE = 'safe'   # runs after the single global confirmation
+RISK_REVIEW = 'review'  # additionally asks per step; the user sees the target
+RISK_HIGH = 'high'   # same per-step gate as review; reserved for riskier fixes
+RISK_MANUAL = 'manual'  # advice only; never executes, recorded skipped
+RISKS = (RISK_SAFE, RISK_REVIEW, RISK_HIGH, RISK_MANUAL)
+
+# operation journal (ТЗ 9.4): <root>/<OPS_DIR_NAME>/<OPS_JOURNAL_NAME>
+OPS_DIR_NAME = '.agents-doctor'
+OPS_JOURNAL_NAME = 'operations.jsonl'
+
 _LOCAL_IGNORE_LINES = ('.env', '.mcp.json', 'settings.local.json')
+
+
+def step_risk(step):
+    """Risk of one plan step; steps without a valid risk field are
+    'safe' (plans built before the field existed keep working)."""
+    risk = (step or {}).get('risk')
+    return risk if risk in RISKS else RISK_SAFE
 
 
 class UnsupportedError(Exception):
@@ -121,16 +165,21 @@ RemediateBusy = trashops.LockBusy
 # registry maps the ones with a supported fix to a plan builder spec:
 # 'autofix' entries build a trash_move step for evidence[0].file;
 # manual entries list (command, note) migration steps that are printed
-# but never executed (apply_plan records them as skipped/manual).
+# but never executed (apply_plan records them as skipped/manual); a
+# 'builder' entry is a function (root, fid, check_id, evidence) ->
+# steps for findings whose steps depend on the evidence. 'risk' is the
+# ТЗ 9.3 level the built steps carry.
 CHECK_ID_FIXES = {
     'CLAUDE_LOCAL_DEPRECATED': {
         'autofix': True,
+        'risk': RISK_REVIEW,   # the user looks first: the file may be needed
         'note': 'CLAUDE.local.md is deprecated; the file moves into the '
                 'trash run -- merge anything worth keeping into CLAUDE.md '
                 'or .claude/rules/ before deleting the trash',
     },
     'CURSOR_LEGACY_AND_RULES': {
         'autofix': False,
+        'risk': RISK_MANUAL,
         'manual': [
             ('migrate .cursorrules content -> .cursor/rules/legacy.md',
              'the legacy format cannot express scoping; frontmatter '
@@ -143,6 +192,7 @@ CHECK_ID_FIXES = {
     },
     'WINDSURF_LEGACY_AND_RULES': {
         'autofix': False,
+        'risk': RISK_MANUAL,
         'manual': [
             ('migrate .windsurfrules content -> .windsurf/rules/legacy.md',
              'the legacy format cannot express triggers; frontmatter has '
@@ -152,6 +202,15 @@ CHECK_ID_FIXES = {
              'both sources present can overlap or conflict, so removal '
              'follows the migration, not the other way round'),
         ],
+    },
+    # instruction blocks duplicated across sources (ТЗ 9.3c): the plan
+    # names both files and lines; the extraction into one shared file
+    # is a hand edit, never an automatic rewrite
+    'INSTR_DUPLICATION': {
+        'autofix': False,
+        'risk': RISK_MANUAL,
+        'builder': lambda root, fid, check_id, evidence: _plan_instr_duplication(
+            root, fid, check_id, evidence),
     },
 }
 
@@ -200,6 +259,43 @@ def _exists_quiet(p):
         return Path(p).exists()
     except OSError:
         return False
+
+
+def _find_ref_line(path, ref):
+    """1-based line number of the first line containing ref, or None
+    (plan-time read only; used to point the user at the dead
+    reference)."""
+    try:
+        text = Path(path).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return None
+    for num, line in enumerate(text.splitlines(), 1):
+        if ref in line:
+            return num
+    return None
+
+
+def _dedupe_json(raw):
+    """Parse a JSON document keeping the FIRST occurrence of every
+    duplicate key (at every nesting level, matching the duplicate
+    detection in enrich._json_dup_keys; the stdlib parser alone keeps
+    the LAST one). Returns (model, sorted duplicate key names);
+    raises ValueError when the text is not valid JSON."""
+    dups = set()
+
+    def hook(pairs):
+        obj = {}
+        seen = set()
+        for key, value in pairs:
+            if key in seen:
+                dups.add(key)
+            else:
+                seen.add(key)
+                obj[key] = value
+        return obj
+
+    model = json.loads(raw, object_pairs_hook=hook)
+    return model, sorted(dups)
 
 
 def after_path(scan_path):
@@ -306,6 +402,7 @@ def plan(rep, fid):
                     root / TRASH_DIR_NAME / '<timestamp>-<opid>'
                     / _rel_under(target, root)),
                 'reversible': True,
+                'risk': RISK_SAFE,
                 'note': 'lands under %s/<timestamp>-<opid>/ with the relative '
                         'path kept; undo with safe_clean.py restore' % TRASH_DIR_NAME,
                 'snapshot': trashops.snapshot(target),
@@ -337,6 +434,7 @@ def plan(rep, fid):
             'target': str(target),
             'command': 'write template .gitignore -> "%s"' % target,
             'reversible': True,
+            'risk': RISK_SAFE,
             'note': note,
         }]
 
@@ -358,10 +456,117 @@ def plan(rep, fid):
                 'target': str(target),
                 'command': 'rmdir "%s"' % target,
                 'reversible': True,
+                'risk': RISK_SAFE,
                 'note': 'directory is empty; removing it loses no content',
                 'snapshot': trashops.snapshot(target),
             })
         return steps
+
+    # 4) dead references in instruction files (ТЗ 9.3a): one manual
+    # step per reference -- verify the path or remove it by hand; the
+    # markdown text is deliberately never rewritten automatically
+    if prefix == 'RUL' and re.match(r'^Dead (link|path|command) in ', title):
+        steps = []
+        for ev in evidence:
+            rel_file = ev.get('file')
+            ref = ev.get('ref')
+            kind = ev.get('kind') or 'reference'
+            if not rel_file or not ref:
+                continue
+            target = root / rel_file
+            _require_inside(root, target)
+            if not _exists_quiet(target):
+                continue  # the instruction file itself is gone since the scan
+            line = _find_ref_line(target, ref)
+            # display in posix form whatever the platform separator is
+            where = '%s:%s' % (Path(rel_file).as_posix(),
+                               line if line else '?')
+            steps.append({
+                'action': 'fix_dead_link',
+                'target': str(target),
+                'command': 'verify the path or remove the dead %s %r in %s'
+                           % (kind, ref, where),
+                'reversible': False,
+                'risk': RISK_MANUAL,
+                'autofix_available': False,
+                'note': 'the instruction file points at %r which does not '
+                        'exist; check whether the path moved, then fix or '
+                        'remove the reference by hand -- rewriting the text '
+                        'automatically could discard a rule worth keeping'
+                        % ref,
+                'ref': ref,
+                'kind': kind,
+                'line': line,
+            })
+        return steps
+
+    # 5) oversized instruction file (ТЗ 9.3d): shrink advice, manual
+    if prefix == 'RUL' and title.startswith('Instruction file over'):
+        steps = []
+        for ev in evidence:
+            rel_file = ev.get('file')
+            if not rel_file:
+                continue
+            target = root / rel_file
+            _require_inside(root, target)
+            if not _exists_quiet(target):
+                continue
+            size = ev.get('size') or 'over the benchmark'
+            steps.append({
+                'action': 'context_tax_hint',
+                'target': str(target),
+                'command': 'shrink the instruction file %s (%s over the '
+                           'auto-load benchmark)' % (rel_file, size),
+                'reversible': False,
+                'risk': RISK_MANUAL,
+                'autofix_available': False,
+                'note': 'the file is auto-loaded into every session, so its '
+                        'size is a per-session tax: keep only rules in it, '
+                        'move reference material into documents the agent '
+                        'reads on demand and link them',
+            })
+        return steps
+
+    # 6) duplicate keys in a JSON config (ТЗ 9.3b): the plan shows the
+    # duplicates; the rewrite is one review-gated step -- first
+    # occurrence wins, key order kept, indent 2, original backed up in
+    # the trash run
+    if prefix == 'CFG' and title.startswith('Duplicate key'):
+        ev0 = (evidence or [{}])[0] if evidence else {}
+        rel_file = ev0.get('file')
+        if not rel_file:
+            raise UnsupportedError(
+                '%s: duplicate-key finding carries no file to fix' % fid)
+        target = root / rel_file
+        _require_inside(root, target)
+        if not _exists_quiet(target):
+            return []            # already gone since the scan: nothing to plan
+        try:
+            raw = Path(target).read_text(encoding='utf-8', errors='replace')
+            model, dups = _dedupe_json(raw)
+        except ValueError as exc:
+            raise UnsupportedError(
+                '%s: %s is not valid JSON (%s); normalize supports JSON '
+                'files only -- fix it by hand' % (fid, rel_file, exc))
+        if not dups:
+            return []            # duplicates already gone: nothing to rewrite
+        return [{
+            'action': 'normalize_config',
+            'target': str(target),
+            'command': 'rewrite %s without the duplicate key(s) %s -- first '
+                       'occurrence wins, key order kept, indent 2'
+                       % (rel_file, ', '.join(repr(k) for k in dups)),
+            'reversible': True,
+            'risk': RISK_REVIEW,
+            'autofix_available': True,
+            'note': 'the original file moves into the trash run as the '
+                    'backup, then the deduplicated text is written in its '
+                    'place (json model, indent 2 -- a source formatted '
+                    'otherwise will show a whitespace diff); undo with '
+                    'safe_clean.py restore',
+            'snapshot': trashops.snapshot(target),
+            'dup_keys': dups,
+        }]
 
     raise UnsupportedError(
         '%s: no supported automatic fix for this finding (title %r, gate %s, '
@@ -369,7 +574,7 @@ def plan(rep, fid):
         % (fid, title, finding.get('gate'), finding.get('category')))
 
 
-def _trash_step(root, target, note):
+def _trash_step(root, target, note, risk=RISK_SAFE):
     """One trash_move step dict for an absolute target under root."""
     return {
         'action': 'trash_move',
@@ -379,9 +584,56 @@ def _trash_step(root, target, note):
             root / TRASH_DIR_NAME / '<timestamp>-<opid>'
             / _rel_under(target, root)),
         'reversible': True,
+        'risk': risk,
         'note': note,
         'snapshot': trashops.snapshot(target),
     }
+
+
+def _plan_instr_duplication(root, fid, check_id, evidence):
+    """dedupe_instructions steps for an INSTR_DUPLICATION finding
+    (ТЗ 9.3c).
+
+    The adapter evidence carries both sides of the duplicated block:
+    [{'file': a, 'line': la, 'detail': text}, {'file': b, 'line': lb,
+    ...}]. The plan restates both spots and recommends extracting the
+    block into one shared file; the edit itself is manual -- merging
+    instruction text automatically could silently change what agents
+    load. A first file that is already gone since the scan plans
+    nothing."""
+    steps = []
+    for i, ev in enumerate(evidence or []):
+        rel_file = ev.get('file')
+        if not rel_file:
+            continue
+        target = Path(rel_file)
+        if not target.is_absolute():
+            target = root / target
+        _require_inside(root, target)
+        if not _exists_quiet(target):
+            continue
+        others = ['%s:%s' % (o.get('file'), o.get('line'))
+                  for j, o in enumerate(evidence or [])
+                  if j != i and o.get('file')]
+        steps.append({
+            'action': 'dedupe_instructions',
+            'target': str(target),
+            'command': 'extract the duplicated block at %s:%s into one '
+                       'shared file and import/reference it from %s'
+                       % (rel_file, ev.get('line'),
+                          ', '.join(others) or 'the other sources'),
+            'reversible': False,
+            'risk': RISK_MANUAL,
+            'autofix_available': False,
+            'note': 'the same block appears in %s and %s ("%s..."); two '
+                    'copies drift apart and both are paid for in every '
+                    'session -- keep one copy and reference it'
+                    % ('%s:%s' % (rel_file, ev.get('line')),
+                       ', '.join(others) or 'the other source',
+                       (ev.get('detail') or '')[:60]),
+            'check_id': check_id,
+        })
+    return steps
 
 
 def _plan_check_id(root, fid, check_id, evidence):
@@ -389,16 +641,20 @@ def _plan_check_id(root, fid, check_id, evidence):
 
     The target comes from evidence[0] ('file', as the adapters write
     it; 'path' accepted too), absolute or root-relative. Registered
-    autofix entries build a trash_move step; manual entries build
-    display-only steps with autofix_available=False that apply_plan
-    records as skipped (nothing executes). A target that is already
-    gone since the scan plans nothing. Unregistered check_ids raise
-    UnsupportedError naming the check_id."""
+    autofix entries build a trash_move step (risk from the spec, ТЗ
+    9.3); manual entries build display-only steps with
+    autofix_available=False that apply_plan records as skipped
+    (nothing executes); a spec with a 'builder' plans straight from
+    the evidence. A target that is already gone since the scan plans
+    nothing. Unregistered check_ids raise UnsupportedError naming the
+    check_id."""
     spec = CHECK_ID_FIXES.get(check_id)
     if spec is None:
         raise UnsupportedError(
             '%s: no supported automatic fix for check_id %s; apply its '
             'recommendation by hand' % (fid, check_id))
+    if spec.get('builder'):
+        return spec['builder'](root, fid, check_id, evidence)
     ev = (evidence or [{}])[0] if evidence else {}
     raw = ev.get('file') or ev.get('path')
     if not raw:
@@ -412,7 +668,8 @@ def _plan_check_id(root, fid, check_id, evidence):
     if not _exists_quiet(target):
         return []            # already gone since the scan: nothing to plan
     if spec.get('autofix'):
-        step = _trash_step(root, target, spec.get('note') or '')
+        step = _trash_step(root, target, spec.get('note') or '',
+                           risk=spec.get('risk') or RISK_SAFE)
         step['check_id'] = check_id
         step['autofix_available'] = True
         return [step]
@@ -423,6 +680,7 @@ def _plan_check_id(root, fid, check_id, evidence):
             'target': str(target),
             'command': command,
             'reversible': False,   # no automatic undo for a hand migration
+            'risk': spec.get('risk') or RISK_MANUAL,
             'note': note,
             'autofix_available': False,
             'check_id': check_id,
@@ -431,13 +689,14 @@ def _plan_check_id(root, fid, check_id, evidence):
 
 
 def print_plan(fid, steps):
-    """Print a plan the way the CLIs show a dry run."""
+    """Print a plan the way the CLIs show a dry run (risk per step)."""
     print('fix plan for %s:' % fid)
     if not steps:
         print('  (nothing to do: no target from this finding is present)')
         return
     for i, st in enumerate(steps, 1):
-        print('  %d. [%s] %s' % (i, st.get('action'), st.get('command')))
+        print('  %d. [%s] (risk: %s) %s'
+              % (i, st.get('action'), step_risk(st), st.get('command')))
         print('     reversible: %s' % ('yes' if st.get('reversible') else 'no'))
         if st.get('note'):
             print('     note: %s' % st['note'])
@@ -445,12 +704,19 @@ def print_plan(fid, steps):
 
 # --- execution -----------------------------------------------------------------
 
+# manual-risk action types (ТЗ 9.3): never dispatched even when a
+# legacy caller hands them to _execute_step directly
+MANUAL_ACTIONS = ('manual', 'fix_dead_link', 'dedupe_instructions',
+                  'context_tax_hint')
+
+
 def _execute_step(step, root, get_run):
     """Run one step; returns an executed-record dict, SKIPPED or
     CHANGED. get_run() lazily creates the shared trash run (opid +
     manifest) the first time a step needs it. Every mutating action --
-    trash_move, rmdir, write_gitignore -- is journaled in that run's
-    write-ahead manifest, so the whole plan is one undoable unit.
+    trash_move, rmdir, write_gitignore, normalize_config -- is
+    journaled in that run's write-ahead manifest, so the whole plan is
+    one undoable unit.
 
     P0.1: every mutating action runs trashops._pre_operation_check
     immediately before it touches the disk (after the user confirmed):
@@ -462,7 +728,7 @@ def _execute_step(step, root, get_run):
     action = step.get('action')
     target = Path(step.get('target', ''))
     cur = None
-    if action == 'manual':
+    if action in MANUAL_ACTIONS or step_risk(step) == RISK_MANUAL:
         return MANUAL       # advice only; apply_plan records it skipped
     if action in ('rmdir', 'trash_move'):
         # P0.1 gate: the symlink walk runs first, so a swapped link is
@@ -522,25 +788,105 @@ def _execute_step(step, root, get_run):
         return {'action': action, 'target': str(src),
                 'result': 'moved', 'moved_to': str(dst),
                 'trash_run': str(run.run_dir), 'opid': run.opid}
+    if action == 'normalize_config':
+        # ТЗ 9.3b: rewrite a JSON config without duplicate keys. The
+        # mtime/size snapshot from plan time gates the TOCTOU window;
+        # a drifted or vanished file is skipped as changed, never
+        # rewritten. The original bytes move into the trash run as the
+        # backup BEFORE the deduplicated text is written in their
+        # place (json model, first occurrence wins, key order kept,
+        # indent 2), so restore always has the exact original.
+        ok, reason = trashops._pre_operation_check(
+            root, target, step.get('snapshot'), expected_type='file')
+        if not ok:
+            if reason in ('changed', 'missing'):
+                return CHANGED   # drifted/vanished since plan(): skip
+            raise trashops.SecurityRefusal(
+                'normalize_config refused (%s): %s' % (reason, target))
+        try:
+            raw = Path(target).read_text(encoding='utf-8',
+                                         errors='replace')
+            model, dups = _dedupe_json(raw)
+        except OSError as exc:
+            raise OSError('cannot read %s: %s' % (target, exc))
+        except ValueError as exc:
+            raise ValueError('%s no longer parses as JSON (%s); normalize '
+                             'refused' % (target, exc))
+        if not dups:
+            return SKIPPED       # duplicates gone since the scan: no rewrite
+        new_text = json.dumps(model, ensure_ascii=False, indent=2) + '\n'
+        rel = target.resolve().relative_to(root).as_posix()
+        cur = trashops.snapshot(target)
+        run = get_run()
+        dst, _idx = trashops.move_to_trash(
+            run, target, rel, cur.get('size') or 0,
+            cur.get('mtime_ns'), cur.get('type'))
+        trashops.record_create_file(run, target, rel, new_text)
+        return {'action': action, 'target': str(target),
+                'result': 'normalized', 'removed_dup_keys': dups,
+                'moved_to': str(dst),
+                'trash_run': str(run.run_dir), 'opid': run.opid}
     raise ValueError('unknown action: %r' % (action,))
 
 
+def _log_operation(root, fid, steps, journal_steps):
+    """Append one operations.jsonl line for an applied plan (ТЗ 9.4).
+
+    The journal records what was attempted -- {ts, fid, check_id, root,
+    steps: [{action, target, risk, result}]} -- and nothing else:
+    no file contents, no refs, no notes, so no secret can leak into
+    it. Journal failures print a warning to stderr and never fail the
+    apply."""
+    try:
+        check_id = next((s.get('check_id') for s in steps
+                         if isinstance(s, dict) and s.get('check_id')),
+                        None)
+        line = {'ts': datetime.now().isoformat(timespec='seconds'),
+                'fid': fid, 'check_id': check_id, 'root': str(root),
+                'steps': journal_steps}
+        ops_dir = Path(root) / OPS_DIR_NAME
+        ops_dir.mkdir(parents=True, exist_ok=True)
+        with (ops_dir / OPS_JOURNAL_NAME).open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps(line, ensure_ascii=False) + '\n')
+    except Exception as exc:
+        print('%s: operations journal not written: %s: %s'
+              % (PROG, type(exc).__name__, exc), file=sys.stderr)
+
+
+def _journal_step(st, risk, result):
+    """One journal step record: action/target/risk/result, no content."""
+    return {'action': (st or {}).get('action'),
+            'target': (st or {}).get('target'),
+            'risk': risk, 'result': result}
+
+
 def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
-               before_findings=None):
+               before_findings=None, fid=None, confirm=None):
     """Execute planned steps after an explicit confirmation.
 
     Interactive by default: the plan is printed and the caller must
-    answer exactly 'yes' to the prompt. assume_yes=True skips the prompt
-    (tests and automation only; the CLI never passes it). Every target
-    is containment-checked against the resolved root before anything
-    runs. A failing step is recorded and the run continues with the
-    next step; a step whose target changed since plan() is skipped as
-    {'reason': 'changed'}; a manual step (check_id registry, ТЗ 13.3)
-    is recorded as skipped with reason 'manual' and never touches the
-    disk. Every mutating step -- trash moves, rmdirs, written
-    .gitignore files -- is journaled in one trash run directory
-    (timestamp + opid) with a write-ahead manifest, so the whole plan
-    is undoable in one `safe_clean.py restore <run_dir>`.
+    answer exactly 'yes' to the prompt (confirm=callable replaces
+    input for tests; it is asked for the global prompt and for every
+    per-step risk prompt). assume_yes=True skips the prompt and every
+    per-step risk prompt (tests and automation only; the CLI never
+    passes it). Every target is containment-checked against the
+    resolved root before anything runs. A failing step is recorded and
+    the run continues with the next step; a step whose target changed
+    since plan() is skipped as {'reason': 'changed'}; a manual step
+    (risk 'manual', ТЗ 9.3) is recorded as skipped with reason
+    'manual' and never touches the disk. Every mutating step -- trash
+    moves, rmdirs, written .gitignore files, config normalizations --
+    is journaled in one trash run directory (timestamp + opid) with a
+    write-ahead manifest, so the whole plan is undoable in one
+    `safe_clean.py restore <run_dir>`.
+
+    Risk levels (ТЗ 9.3): safe steps run after the single global
+    'yes'. review and high steps additionally prompt per step --
+    'step N risk=REVIEW: <target> -- apply this step? [yes/no]' -- and
+    a 'no' or EOF skips that step with reason 'declined-risk' (the
+    rest of the plan still runs). manual steps never execute. Steps
+    without a risk field are 'safe', so plans from older callers keep
+    working.
 
     Concurrency (ТЗ 16): the first mutating step takes the trash lock
     (<root>/<TRASH_DIR_NAME>/.lock, O_EXCL); while another run holds
@@ -548,6 +894,11 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
     trashops.LockBusy) instead of racing it. The lock is released in a
     finally; a plan whose every step was skipped or manual never takes
     it and never creates the trash directory.
+
+    fid (ТЗ 9.4) rides into the operations journal
+    (<root>/.agents-doctor/operations.jsonl, one line per apply: ts,
+    fid, check_id, root, per-step action/target/risk/result -- never
+    file contents); journal failures never fail the apply.
 
     reaudit=True (ТЗ 13.2) re-runs audit_scan.scan(root, home) after a
     successful apply (home defaults to Path.home(); pass the scan's
@@ -564,6 +915,7 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
     taken before the first mutation).
     """
     root = Path(root).resolve()
+    ask = confirm if confirm is not None else input
     report = {'executed': [], 'failed': [], 'skipped': [], 'declined': False,
               'trash_run': None, 'opid': None}
     steps = list(steps or [])
@@ -589,23 +941,34 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
         print('refused: %d step(s) fail the containment check '
               '(target escaped the workspace root); nothing executed'
               % len(refused))
+        refused_targets = {st.get('target') for st, _exc in refused}
+        _log_operation(root, fid, steps, [
+            _journal_step(st, step_risk(st),
+                          'refused' if st.get('target') in refused_targets
+                          else 'skipped')
+            for st in steps])
         return report
     print('plan to apply:')
     for i, st in enumerate(steps, 1):
-        print('  %d. [%s] %s' % (i, st.get('action'), st.get('command')))
+        print('  %d. [%s] (risk: %s) %s'
+              % (i, st.get('action'), step_risk(st), st.get('command')))
         if st.get('note'):
             print('     note: %s' % st['note'])
     if not assume_yes:
         try:
-            answer = input('apply? [yes/no] ')
+            answer = ask('apply? [yes/no] ')
         except EOFError:
             answer = ''
         if answer.strip() != 'yes':
             report['declined'] = True
             print('declined; nothing executed')
+            _log_operation(root, fid, steps,
+                           [_journal_step(st, step_risk(st), 'skipped:declined')
+                            for st in steps])
             return report
 
     state = {'run': None, 'lock': None}
+    journal = []
 
     def get_run():
         if state['run'] is None:
@@ -627,7 +990,31 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
         return state['run']
 
     try:
-        for st in steps:
+        for num, st in enumerate(steps, 1):
+            risk = step_risk(st)
+            # ТЗ 9.3: manual steps never execute; review/high steps
+            # need their own yes (EOF or a refusal skips the step)
+            if risk == RISK_MANUAL:
+                report['skipped'].append({'action': st.get('action'),
+                                          'target': st.get('target'),
+                                          'reason': 'manual'})
+                journal.append(_journal_step(st, risk, 'skipped:manual'))
+                continue
+            if risk in (RISK_REVIEW, RISK_HIGH) and not assume_yes:
+                try:
+                    answer = ask('step %d risk=%s: %s -- apply this step? '
+                                 '[yes/no] ' % (num, risk.upper(),
+                                                st.get('target')))
+                except EOFError:
+                    answer = ''
+                if answer.strip() != 'yes':
+                    report['skipped'].append({
+                        'action': st.get('action'),
+                        'target': st.get('target'),
+                        'reason': 'declined-risk'})
+                    journal.append(_journal_step(
+                        st, risk, 'skipped:declined-risk'))
+                    continue
             try:
                 outcome = _execute_step(st, root, get_run)
             except trashops.LockBusy:
@@ -639,6 +1026,7 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
                 report['failed'].append(
                     {'action': st.get('action'), 'target': st.get('target'),
                      'error': '%s: %s' % (type(exc).__name__, exc)})
+                journal.append(_journal_step(st, risk, 'failed'))
                 print('%s: step failed, continuing: [%s] %s: %s'
                       % (PROG, st.get('action'), st.get('target'), exc),
                       file=sys.stderr)
@@ -646,16 +1034,21 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
             if outcome == SKIPPED:
                 report['skipped'].append({'action': st.get('action'),
                                           'target': st.get('target')})
+                journal.append(_journal_step(st, risk, 'skipped'))
             elif outcome == CHANGED:
                 report['skipped'].append({'action': st.get('action'),
                                           'target': st.get('target'),
                                           'reason': 'changed'})
+                journal.append(_journal_step(st, risk, 'skipped:changed'))
             elif outcome == MANUAL:
                 report['skipped'].append({'action': st.get('action'),
                                           'target': st.get('target'),
                                           'reason': 'manual'})
+                journal.append(_journal_step(st, risk, 'skipped:manual'))
             else:
                 report['executed'].append(outcome)
+                journal.append(_journal_step(
+                    st, risk, outcome.get('result') or 'executed'))
         if state['run'] is not None:
             state['run'].finish(
                 planned=len(steps),
@@ -665,10 +1058,14 @@ def apply_plan(steps, root, assume_yes=False, reaudit=False, home=None,
                 removed_dirs=sum(1 for e in report['executed']
                                  if e.get('action') == 'rmdir'),
                 created=sum(1 for e in report['executed']
-                            if e.get('action') == 'write_gitignore'))
+                            if e.get('action') == 'write_gitignore'),
+                normalized=sum(1 for e in report['executed']
+                               if e.get('action') == 'normalize_config'))
     finally:
         if state['lock'] is not None:
             state['lock'].release()
+
+    _log_operation(root, fid, steps, journal)
 
     if reaudit and not report['declined']:
         home_path = Path(home).resolve() if home else Path.home()
@@ -717,18 +1114,26 @@ def main(argv=None):
         description='Guarded fix engine for agents-doctor findings: plan '
                     'small reversible steps for one finding, apply them only '
                     'after explicit confirmation, optionally re-audit.',
-        epilog='Supported fixes (v1): empty-dir rmdir; .gitignore template for '
+        epilog='Supported fixes: empty-dir rmdir; .gitignore template for '
                'a repo missing one; confirmed-unused junk moved into '
                '%s/<timestamp>-<opid>/ (write-ahead manifest; undo with '
                'safe_clean.py restore <run_dir>); harness check_id fixes '
                '(CLAUDE_LOCAL_DEPRECATED moves the file into the trash run; '
                'CURSOR/WINDSURF_LEGACY_AND_RULES print a manual migration '
-               'plan). Everything else is refused '
+               'plan; INSTR_DUPLICATION prints a dedupe plan); dead '
+               'references in instruction files get manual verify-or-remove '
+               'steps; a JSON config with duplicate keys is rewritten '
+               'keeping the first occurrence (normalize_config, per-step '
+               'confirmation); an oversized instruction file gets shrink '
+               'advice. Steps carry a risk level: safe runs after the one '
+               'global yes, review/high additionally asks per step, manual '
+               'never executes. Applies append an audit line to '
+               '%s/operations.jsonl. Everything else is refused '
                'with exit code 3. No network, no git mutations, nothing '
                'outside the audited root. Dry run by default; --apply still '
                'asks for the word "yes". Runs hold the trash lock '
                '(%s/.lock); a concurrent run is refused cleanly.' % (
-                   TRASH_DIR_NAME, TRASH_DIR_NAME))
+                   TRASH_DIR_NAME, OPS_DIR_NAME, TRASH_DIR_NAME))
     ap.add_argument('scan', help='scan.json from a previous audit')
     ap.add_argument('fid', help='finding id to fix (see agents_doctor.py explain)')
     ap.add_argument('--apply', action='store_true',
@@ -769,7 +1174,7 @@ def main(argv=None):
               '--apply and confirm to execute)' % (PROG, a.fid, len(steps)))
     else:
         try:
-            report = apply_plan(steps, root)
+            report = apply_plan(steps, root, fid=a.fid)
         except RemediateBusy as exc:
             print('%s: %s' % (PROG, exc), file=sys.stderr)
             return 1

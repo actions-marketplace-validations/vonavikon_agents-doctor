@@ -157,15 +157,21 @@ jobs:
   ui-e2e:
     # browser E2E over the local UI server (Visual TZ section 7).
     # The playwright suite skips itself everywhere else; only this job
-    # installs the browser, so it is the one place the tests run.
+    # installs the browsers, so it is the one place the tests run.
+    # Two passes: chromium (default) and firefox via AGENTS_E2E_BROWSER
+    # (the channel is picked inside UiHarness from that env var).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install -r requirements-dev.txt
-      - run: python -m playwright install --with-deps chromium
-      - name: browser E2E (unittest + playwright sync API)
+      - run: python -m playwright install --with-deps chromium firefox
+      - name: browser E2E — chromium
+        run: python -m unittest tests.e2e.test_ui_e2e -v
+      - name: browser E2E — firefox
+        env:
+          AGENTS_E2E_BROWSER: firefox
         run: python -m unittest tests.e2e.test_ui_e2e -v
 
   release:
