@@ -10,3 +10,4 @@ bench/work/
 llm-eval/runs/
 tests/integration/run/
 .agents-doctor/
+temp-rel/
