@@ -4,6 +4,76 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [3.0.0] - 2026-11-18
+
+Quality, reliability and production readiness (TZ 3.0, five stages).
+Backward compatible: v1 policies, the always-zero policy exits without
+an enforcement block, and audit without new flags behave as 2.1.x.
+
+### Stage 1 — policy enforcement, TreeMap, E2E
+
+- Policy schema version 2: working block_on_failure and block_above per
+  domain, enforcement block (enabled / default_action / unknown_action)
+  with merge semantics; dedicated exit codes 0/1/2/3/4 for policy and
+  audit --policy (the report is always written first); new domains
+  harness_versions and required_skills; action.yml policy-enforcement
+  input gates CI.
+- TreeMap navigation rebuilt: click selects in place, double click
+  zooms, Enter/Space activate, Backspace zooms out from anywhere in the
+  treemap, breadcrumbs carry data-path, selection survives navigation.
+- Playwright E2E suite (21 scenarios at this stage, 29 by stage 4),
+  console-error gate in every test, chromium + firefox in CI.
+
+### Stage 2 — harness conformance
+
+- Per-capability honesty statuses for all 8 adapters x 13 capabilities
+  (documented / runtime-tested / approximated / unsupported / unknown),
+  each with an inline justification; adapter quality score with printed
+  weights; conformance runner with golden fixtures (48/48 green);
+  capability-matrix.json generated from the registry, staleness-gated.
+
+### Stage 3 — scale
+
+- Tree API: cursor pagination (500/page), sort by name/size/problems,
+  severity filter; /api/tree/stats with exact recursive sizes (symlinks
+  never double-counted, inaccessible paths reported, fingerprint
+  cache); /api/search over the whole workspace; virtualized tree
+  (window + overscan), sentinel pagination, LRU page cache, graceful
+  degradation on the old API.
+
+### Stage 4 — governance and diagnostics
+
+- Workspace Health Score: deterministic, weighted (security .30,
+  config .20, instructions .20, compatibility .15, hygiene .10,
+  observability .05), critical findings cap the score at 40, formula
+  printed; History tab: findings over time, recorded scans, click-two-
+  to-diff, regressions; unknown reads as null, never as zero.
+- Runtime diagnostics: skills inventory with versions and cross-
+  location conflicts, plugin cache freshness, MCP command PATH
+  availability, config validity — offline, zero new subprocesses.
+- E2E: the full 11-step user journey plus error-path scenarios (bare
+  folder, 600-file directory, corrupt scan, POSIX permissions, broken
+  baseline, unknown harness, canary never in the DOM).
+
+### Stage 5 — remediation and LLM eval
+
+- Remediation: per-step risk levels (safe / review / high / manual)
+  with per-step confirmation; dead-link, config normalization (backup +
+  TOCTOU), instruction dedupe and context-tax plan types; operations
+  journal (.agents-doctor/operations.jsonl).
+- llm-eval: R8 secret leakage, R9 evidence grounding, R10 prompt
+  injection, R11 status consistency, R12 reproducibility; optional
+  real-model runs (OpenAI-compatible, opt-in); deterministic vs LLM
+  results strictly separated.
+
+### Housekeeping
+
+- README facts generated from the actual suite (staleness-gated);
+  regression pins for the v2.1.1 hidden-attribute bug class.
+
+Tests: 970 -> 1245. QA eval 267 PASS; secret floors unchanged;
+conformance 48/48; E2E green on chromium and firefox.
+
 ## [2.1.1] - 2026-11-17
 
 ### Fixed
