@@ -1197,6 +1197,10 @@ def evaluate_policies(rep, root, policy_files):
         else:
             warnings.append('policy file from .agents-doctor.toml not '
                             'found: %s' % extra)
+    # the CLI discovery may already include the workspace files; layering
+    # only needs each file once (a duplicate would double policy_versions)
+    seen = set()
+    files = [f for f in files if not (f in seen or seen.add(f))]
 
     versions, domains, customs, policy_name, enforcement = \
         _merge_policy_files(files, warnings)
