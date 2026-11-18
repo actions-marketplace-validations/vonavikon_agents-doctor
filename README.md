@@ -125,6 +125,15 @@ Flags:
 - `--deep` — adds secret scanning of git history; slower on large repos.
 - `--baseline <old scan.json>` — adds a diff section with new and resolved findings; fingerprints are stable across runs.
 
+As a GitHub Action, inside a CI job ([listed on the GitHub Marketplace](https://github.com/marketplace/actions/agents-doctor-audit)):
+
+```
+- uses: actions/checkout@v4
+- uses: vonavikon/agents-doctor@v3
+  with:
+    fail-on: critical
+```
+
 ## Demo
 
 Builds a synthetic workspace with all the typical problems and runs the scanner over it:
