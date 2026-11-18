@@ -202,7 +202,10 @@ class FixDeadLinkPlan(RemediationV3Case):
             self.assertEqual(st['risk'], 'manual')
             self.assertEqual(st['kind'], kind)
             self.assertEqual(st['ref'], needle)
-            self.assertEqual(Path(st['target']), self.repo / 'AGENTS.md')
+            # CI runners hand out 8.3-short (Windows) or
+            # symlinked (macOS /var) temp paths; resolve both sides
+            self.assertEqual(Path(st['target']).resolve(),
+                             (self.repo / 'AGENTS.md').resolve())
             self.assertFalse(st['autofix_available'])
             self.assertIn('%s:%s' % ('repo/AGENTS.md', st['line']),
                           st['command'])
@@ -285,7 +288,8 @@ class ContextTaxHintPlan(RemediationV3Case):
         st = steps[0]
         self.assertEqual(st['action'], 'context_tax_hint')
         self.assertEqual(st['risk'], 'manual')
-        self.assertEqual(Path(st['target']), self.repo2 / 'AGENTS.md')
+        self.assertEqual(Path(st['target']).resolve(),
+                         (self.repo2 / 'AGENTS.md').resolve())
         self.assertFalse(st['autofix_available'])
         self.assertIn('shrink', st['command'])
 

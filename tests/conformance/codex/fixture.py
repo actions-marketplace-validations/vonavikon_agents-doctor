@@ -46,6 +46,17 @@ def build(root: Path) -> None:
         encoding='utf-8')
 
 
+def _toml_findings():
+    """Without tomllib (Python 3.10) the adapter cannot parse the
+    config: the honest outcome is CODEX_TOML_PARSE, not the sandbox
+    danger the file plants."""
+    try:
+        import tomllib  # noqa: F401
+        return ['CODEX_SANDBOX_DANGER']
+    except ImportError:
+        return ['CODEX_TOML_PARSE']
+
+
 def expected() -> dict:
     return {
         # exactly these project markers exist (set match)
@@ -66,5 +77,5 @@ def expected() -> dict:
                        'subdir/AGENTS.md'],
         },
         # sandbox_mode = danger-full-access in .codex/config.toml
-        'validate_findings': ['CODEX_SANDBOX_DANGER'],
+        'validate_findings': _toml_findings(),
     }
