@@ -57,5 +57,23 @@ class HiddenElementsTest(unittest.TestCase):
                          'display outside the [hidden] guard: %r' % offenders)
 
 
+
+
+class FaviconTest(unittest.TestCase):
+    def test_index_references_favicon(self):
+        html = (UI / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('rel="icon"', html)
+        self.assertIn('/static/favicon.png', html)
+
+    def test_favicon_assets_exist_and_small(self):
+        fav = UI / 'favicon.png'
+        apple = UI / 'apple-touch-icon.png'
+        self.assertTrue(fav.is_file())
+        self.assertTrue(apple.is_file())
+        # favicons travel inside the plugin zip: keep them light
+        self.assertLess(fav.stat().st_size, 64 * 1024)
+        self.assertLess(apple.stat().st_size, 96 * 1024)
+
+
 if __name__ == '__main__':
     unittest.main()
