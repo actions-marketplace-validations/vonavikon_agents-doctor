@@ -306,7 +306,20 @@ class TestValidate(ClaudeCodeAdapterTestCase):
         details = {e['detail'] for e in findings[0].evidence}
         self.assertIn('unknown hook event', details)
         self.assertIn('hook without command', details)
-        self.assertIn('hook without matcher', details)
+        # matcher is optional in Claude Code (it only filters tool
+        # events); its absence must not be reported at all
+        self.assertNotIn('hook without matcher', details)
+
+    def test_session_hooks_without_matcher_valid(self):
+        # SessionStart/SessionEnd groups never carry a matcher; they
+        # are the canonical vault-sync pattern and must be clean
+        self.wjson('.claude/settings.json', {'hooks': {
+            'SessionStart': [{'hooks': [{'type': 'command',
+                                         'command': 'pull'}]}],
+            'SessionEnd': [{'hooks': [{'type': 'command',
+                                       'command': 'push'}]}],
+        }})
+        self.assertEqual(self.findings_by_id('CLAUDE_HOOKS_INVALID'), [])
 
     def test_settings_dangerous(self):
         self.wjson('.claude/settings.json',

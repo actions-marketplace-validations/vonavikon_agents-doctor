@@ -23,6 +23,15 @@ Documented deviations from raw legacy behavior:
   skipped by find_rule. The rule regexes themselves are unchanged;
   this is a post-filter applied to the literal rules (SEC-005,
   SEC-101) only.
+- Values containing angle-bracket placeholders ('<ключ naomi>') are
+  skipped as documentation, exactly like '${...}' template values: a
+  placeholder quoted after a keyword is a docs example, not a secret.
+- SEC-001 requires a non-token character (or line start) before
+  'sk-': transliterated slugs like 'vypusk-dokumentacii' embed a
+  false 'sk-dokumentacii' fragment that the bare pattern matched.
+- SEC-102 skips the canonical documentation credential pair
+  'user:secret' ('postgresql://user:secret@' is the PostgreSQL
+  manual's own example connection string).
 - The ERE side cannot express lookbehind or per-rule case sensitivity
   (`git grep -i` matches case-insensitively everywhere), so git-grep
   pre-filter matching is slightly wider than the python rules. The
@@ -38,7 +47,10 @@ RULES = [
     # --- secret_scanner.RULES; ids/kinds/masks/confidences preserved.
     {'id': 'SEC-001', 'kind': 'api-key', 'mask': 'sk-***',
      'confidence': 0.95,
-     'py': re.compile(r'sk-[A-Za-z0-9_-]{16,}'),
+     # left boundary: 'sk-' glued inside a word (transliterated slugs
+     # like 'vypusk-dokumentacii' embed 'sk-dokumentacii') is not a
+     # key; real keys sit at line start or after a quote/space/:=.
+     'py': re.compile(r'(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}'),
      'ere': 'sk-[A-Za-z0-9_-]{16,}'},
     {'id': 'SEC-002', 'kind': 'bearer-token', 'mask': 'Bearer ***',
      'confidence': 0.90,
@@ -105,6 +117,10 @@ GIT_GREP_RE = GIT_GREP_RE_COMBINED
 # Literal rules whose digit-only quoted values are skipped as too weak.
 _WEAK_VALUE_RULES = frozenset(('SEC-005', 'SEC-101'))
 
+# Canonical documentation credential pairs (scheme://user:pass@) that
+# are examples in vendor manuals, not live credentials.
+_DOC_CRED_EXAMPLES = frozenset(('user:secret', 'username:password'))
+
 # python approximation of the git grep side: the POSIX class token
 # [:space:] is not valid python re, translate it (works both standalone
 # as [[:space:]] and inside negated classes like [^/@[:space:]:]);
@@ -121,22 +137,26 @@ def find_rule(line):
 
     Rules are tried in RULES order (specific before generic). For the
     literal rules, digit-only quoted values are skipped as too weak;
-    values containing ${...} template placeholders are skipped as
-    configuration templates, not live secrets.
+    placeholder values (${...} templates, <angle-bracket> docs
+    placeholders) are skipped as configuration examples, not live
+    secrets. SEC-102 additionally skips the canonical documentation
+    credential pair user:secret.
     """
     for rule in RULES:
         if rule['id'] in _WEAK_VALUE_RULES:
             for match in rule['py'].finditer(line):
                 if _is_weak_literal(match):
                     continue
-                if '${' in match.group(0):
-                    continue  # template placeholder, not a real secret
+                if _is_placeholder(match):
+                    continue  # ${...} or <...>, not a real secret
                 return rule
         else:
             match = rule['py'].search(line)
             if match is not None:
-                if '${' in match.group(0):
+                if _is_placeholder(match):
                     continue  # e.g. "Bearer ${API_KEY}" in .example.json
+                if rule['id'] == 'SEC-102' and _is_doc_example(match):
+                    continue  # postgresql://user:secret@ from the manual
                 return rule
     return None
 
@@ -174,6 +194,28 @@ def _is_weak_literal(match):
     return bool(value) and value.isdigit()
 
 
+def _is_placeholder(match):
+    """True for configuration examples, not live secrets: a ${...}
+    substitution anywhere in the match, or an angle-bracket placeholder
+    inside the quoted value of a literal rule ('Bearer <ключ naomi>',
+    '"<токен портала>"'). Real token alphabets never contain <>."""
+    if '${' in match.group(0):
+        return True
+    value = _match_value(match)
+    return '<' in value and '>' in value
+
+
+def _is_doc_example(match):
+    """True for a scheme://user:pass@ match whose credentials are a
+    canonical documentation pair (the PostgreSQL manual uses
+    postgresql://user:secret@ in its connection-string examples)."""
+    text = match.group(0)
+    if '://' not in text or '@' not in text:
+        return False
+    creds = text.split('://', 1)[1].split('@', 1)[0]
+    return creds.lower() in _DOC_CRED_EXAMPLES
+
+
 # (line, expected rule id or None) pairs. Every rule has >= 2 positive
 # lines; the rest are the false-positive corpus: placeholders, env
 # indirection, glued keywords, short/weak values, URL tokens in prose
@@ -182,6 +224,8 @@ PARITY_CORPUS = [
     # SEC-001 sk- tokens
     ('sk-abcdefghijklmnop1234', 'SEC-001'),
     ('export KEY="sk-zyxwvutsrqponmlkj88"', 'SEC-001'),
+    # boundary still matches a real key in prose
+    ('see sk-abcdefghijklmnop1234 now', 'SEC-001'),
     # SEC-002 bearer tokens
     ('Bearer abcdefghijklmnopqrstuv', 'SEC-002'),
     ('authorization: bearer aabbccddeeff0011223344', 'SEC-002'),
@@ -240,4 +284,12 @@ PARITY_CORPUS = [
     # placeholder with <>
     ('Authorization: Bearer <token>', None),
     ('eyJ', None),
+    # transliterated slugs embed 'sk-' inside a word ('vypusk-'): not keys
+    ('uskorit-vypusk-dokumentacii-po-ekosisteme', None),
+    ('zadacha-sroki-vypusk-dokumentacii-v-ekosisteme', None),
+    # angle-bracket placeholder quoted after a keyword: docs example
+    ('"Authorization": "Bearer <ключ naomi>"', None),
+    ('GRAMAX_API_TOKEN: "<токен портала целиком>"', None),
+    # canonical PostgreSQL manual connection-string example
+    ('postgresql://user:secret@localhost:5432/mydb', None),
 ]

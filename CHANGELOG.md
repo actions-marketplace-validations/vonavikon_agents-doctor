@@ -4,6 +4,29 @@ All notable changes to agents-doctor are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow semantic versioning.
 
+## [3.0.1] - 2026-11-18
+
+False-positive fixes found by scanning a real production workspace
+(transliterated slugs, docs placeholders, session hooks). Detection of
+live secrets is unchanged: every fix has corpus positives proving real
+keys in the same shapes still fire.
+
+- SEC-001: 'sk-' glued inside a word (transliterated slugs like
+  'vypusk-dokumentacii' embed a matching fragment) is no longer a
+  finding; a left boundary was added. Keys at line start, after a
+  quote/space/:= are still detected.
+- SEC-005/SEC-101: values containing an angle-bracket placeholder
+  ('"Bearer <ключ>"') are skipped as documentation, like '${...}'
+  template values.
+- SEC-102: the canonical documentation credential pair
+  'postgresql://user:secret@' (the PostgreSQL manual's own example)
+  is no longer a finding.
+- CLAUDE_HOOKS_INVALID: a hooks group without a matcher is no longer
+  reported. Matchers only filter tool events and are optional
+  everywhere in Claude Code; SessionStart/SessionEnd groups never
+  carry one. Unknown events and groups without a command are still
+  reported.
+
 ## [3.0.0] - 2026-11-18
 
 Quality, reliability and production readiness (TZ 3.0, five stages).

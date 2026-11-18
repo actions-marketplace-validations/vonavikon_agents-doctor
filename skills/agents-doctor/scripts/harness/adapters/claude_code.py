@@ -526,26 +526,22 @@ class ClaudeCodeAdapter(HarnessAdapter):
                     has_command = (isinstance(cmds, list) and any(
                         isinstance(h, dict) and str(h.get('command', '')).strip()
                         for h in cmds))
-                    matcher = group.get('matcher')
-                    has_matcher = (isinstance(matcher, (str, list))
-                                   and len(matcher) > 0)
                     if not has_command:
                         evidence.append({'file': str(path), 'event': event,
                                          'detail': 'hook without command'})
-                    if not has_matcher:
-                        evidence.append({'file': str(path), 'event': event,
-                                         'detail': 'hook without matcher'})
             if evidence:
                 findings.append(AdapterFinding(
                     check_id='CLAUDE_HOOKS_INVALID',
                     category='config', severity='medium', status='warn',
                     title='Invalid hooks in Claude Code settings',
                     description=('hooks reference an unknown event or a '
-                                 'group without command/matcher; such a '
+                                 'group without a command; such a '
                                  'hook never fires.'),
                     evidence=evidence,
                     recommendation=('use a documented event and give every '
-                                    'group a matcher and a command.'),
+                                    'group a command. A matcher is only '
+                                    'needed to filter tool events and is '
+                                    'optional everywhere.'),
                     confidence=0.8))
         return findings
 
